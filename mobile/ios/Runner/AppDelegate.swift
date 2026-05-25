@@ -1,4 +1,12 @@
+import AuthenticationServices
+import SwiftUI
 import native_video_player
+
+final class ImmichHostingController<Content: View>: UIHostingController<Content>, ASWebAuthenticationPresentationContextProviding {
+  func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+    view.window ?? ASPresentationAnchor()
+  }
+}
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -14,8 +22,25 @@ import native_video_player
     SwiftNativeVideoPlayerPlugin.cookieStorage = URLSessionManager.cookieStorage
     URLSessionManager.patchBackgroundDownloader()
     BackgroundWorkerApiImpl.registerBackgroundWorkers()
+    _ = ImmichEmbeddedEngine.shared.start()
 
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    installSwiftUIRoot()
+    return result
+  }
+
+  private func installSwiftUIRoot() {
+    let rootViewController = ImmichHostingController(rootView: RootView())
+    if let window = window {
+      window.rootViewController = rootViewController
+      window.makeKeyAndVisible()
+      return
+    }
+
+    let window = UIWindow(frame: UIScreen.main.bounds)
+    window.rootViewController = rootViewController
+    window.makeKeyAndVisible()
+    self.window = window
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {

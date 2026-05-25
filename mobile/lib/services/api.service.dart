@@ -48,8 +48,8 @@ class ApiService {
   }
   final _log = Logger("ApiService");
 
-  Future<void> updateHeaders() async {
-    await NetworkRepository.setHeaders(getRequestHeaders(), getServerUrls());
+  Future<void> updateHeaders({String? token}) async {
+    await NetworkRepository.setHeaders(getRequestHeaders(), getServerUrls(), token: token);
     _apiClient.client = NetworkRepository.client;
   }
 

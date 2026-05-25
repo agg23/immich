@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/metadata_key.dart';
+import 'package:immich_mobile/widgets/common/embedded_scope.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/providers/api.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/metadata.provider.dart';
@@ -54,21 +55,25 @@ class HeaderSettingsPage extends HookConsumerWidget {
       }),
     ];
 
+    final hideChrome = EmbeddedScope.hideChromeOf(context);
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text(context.t.headers_settings_tile_title),
-        centerTitle: false,
-        actions: [
-          IconButton(
-            onPressed: () {
-              headers.value.add(SettingsHeader());
-              headers.value = headers.value.toList();
-            },
-            icon: const Icon(Icons.add_outlined),
-            tooltip: 'header_settings_add_header_tip'.tr(),
-          ),
-        ],
-      ),
+      appBar: hideChrome
+          ? null
+          : AppBar(
+              title: Text(context.t.headers_settings_tile_title),
+              centerTitle: false,
+              actions: [
+                IconButton(
+                  onPressed: () {
+                    headers.value.add(SettingsHeader());
+                    headers.value = headers.value.toList();
+                  },
+                  icon: const Icon(Icons.add_outlined),
+                  tooltip: 'header_settings_add_header_tip'.tr(),
+                ),
+              ],
+            ),
       body: PopScope(
         onPopInvokedWithResult: (didPop, _) => saveHeaders(ref, headers.value),
         child: ListView.separated(

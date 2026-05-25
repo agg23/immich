@@ -2,6 +2,7 @@ import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart' hide Store;
+import 'package:immich_mobile/widgets/common/embedded_scope.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/settings/advanced_settings.dart';
@@ -55,8 +56,9 @@ class SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     context.locale;
+    final hideChrome = EmbeddedScope.hideChromeOf(context);
     return Scaffold(
-      appBar: AppBar(centerTitle: false, title: const Text('settings').tr()),
+      appBar: hideChrome ? null : AppBar(centerTitle: false, title: const Text('settings').tr()),
       body: context.isMobile ? const _MobileLayout() : const _TabletLayout(),
     );
   }
@@ -135,8 +137,9 @@ class SettingsSubPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     context.locale;
+    final hideChrome = EmbeddedScope.hideChromeOf(context);
     return Scaffold(
-      appBar: AppBar(centerTitle: false, title: Text(section.title).tr()),
+      appBar: hideChrome ? null : AppBar(centerTitle: false, title: Text(section.title).tr()),
       body: section.widget,
     );
   }

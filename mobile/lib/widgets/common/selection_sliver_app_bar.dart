@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/widgets/common/embedded_scope.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/translate_extensions.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
@@ -15,6 +16,10 @@ class SelectionSliverAppBar extends ConsumerStatefulWidget {
 class _SelectionSliverAppBarState extends ConsumerState<SelectionSliverAppBar> {
   @override
   Widget build(BuildContext context) {
+    if (EmbeddedScope.hideChromeOf(context)) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
     final selection = ref.watch(multiSelectProvider.select((s) => s.selectedAssets));
 
     final toExclude = ref.watch(multiSelectProvider.select((s) => s.lockedSelectionAssets));

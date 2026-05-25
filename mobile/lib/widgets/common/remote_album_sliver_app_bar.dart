@@ -7,6 +7,7 @@ import 'package:easy_localization/easy_localization.dart' hide TextDirection;
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/widgets/common/embedded_scope.dart';
 import 'package:immich_mobile/domain/models/events.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/domain/utils/event_stream.dart';
@@ -57,6 +58,10 @@ class _MesmerizingSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBa
 
   @override
   Widget build(BuildContext context) {
+    if (EmbeddedScope.hideChromeOf(context)) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
     final isMultiSelectEnabled = ref.watch(multiSelectProvider.select((s) => s.isEnabled));
 
     final currentAlbum = ref.watch(currentRemoteAlbumProvider);

@@ -15,6 +15,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/constants/constants.dart';
 import 'package:immich_mobile/constants/locales.dart';
 import 'package:immich_mobile/domain/services/background_worker.service.dart';
+import 'package:immich_mobile/embedded_entrypoint.dart' as embedded_entrypoint;
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/translate_extensions.dart';
 import 'package:immich_mobile/generated/codegen_loader.g.dart';
@@ -45,6 +46,11 @@ import 'package:immich_ui/immich_ui.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:logging/logging.dart';
 import 'package:timezone/data/latest.dart';
+
+@pragma('vm:entry-point')
+void _ensureEmbeddedEntrypointLinked() {
+  embedded_entrypoint.embeddedForegroundEntrypoint;
+}
 
 void main() async {
   try {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:immich_mobile/widgets/common/embedded_scope.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/translate_extensions.dart';
 
@@ -7,6 +8,10 @@ class LocalAlbumsSliverAppBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (EmbeddedScope.hideChromeOf(context)) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
     return SliverAppBar(
       floating: true,
       pinned: true,
