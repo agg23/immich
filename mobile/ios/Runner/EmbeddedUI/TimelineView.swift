@@ -292,16 +292,17 @@ private enum PinchAnchorDebugSource: Equatable {
 
 private struct AnchoredGridTransition: Equatable {
   let targetAssetIndex: Int
-  let contentCentroid: CGPoint
-  let viewportCentroid: CGPoint
-  let anchorUnitPoint: CGPoint
   let fromColumns: Int
   let toColumns: Int
-  let sourceGridOriginX: CGFloat
-  let targetGridOriginX: CGFloat
   let sourceGridColumnOffset: Int
   let targetGridColumnOffset: Int
-  var continuousColumns: CGFloat
+  let sourceCanvasOrigin: CGPoint
+  let targetCanvasOrigin: CGPoint
+  let sourceTileSize: CGFloat
+  let sourceStep: CGFloat
+  let targetTileSize: CGFloat
+  let targetStep: CGFloat
+  let sourceViewportAnchor: CGPoint
   var geometryProgress: CGFloat
   var contentProgress: CGFloat
   let slots: [AnchoredGridSlot]
@@ -495,9 +496,9 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
       where assets.indices.contains(sourceIndex) && assets.indices.contains(targetIndex):
       cell.configureTransition(source: assets[sourceIndex], target: assets[targetIndex], progress: progress)
     case let (.some(sourceIndex), .none) where assets.indices.contains(sourceIndex):
-      cell.configureTransition(source: assets[sourceIndex], target: assets[sourceIndex], progress: 0)
+      cell.configure(asset: assets[sourceIndex])
     case let (.none, .some(targetIndex)) where assets.indices.contains(targetIndex):
-      cell.configureTransition(source: assets[targetIndex], target: assets[targetIndex], progress: 1)
+      cell.configure(asset: assets[targetIndex])
     default:
       break
     }
@@ -525,21 +526,47 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
     let transitionWindow = layout.columnTransitionWindow(sourceColumn: sourceColumn, fromColumns: fromColumns, toColumns: toColumns)
     let targetColumn = transitionWindow.targetFocusColumn
     let targetGridColumnOffset = layout.columnOffset(anchorIndex: targetAssetIndex, columns: toColumns, desiredColumn: targetColumn)
-    let sourceGridOriginX = layout.cellLeftX(column: transitionWindow.sourceStart, columns: CGFloat(fromColumns), width: collectionView.bounds.width)
-    let targetGridOriginX = layout.cellLeftX(column: transitionWindow.targetStart, columns: CGFloat(toColumns), width: collectionView.bounds.width)
+    let anchorCanvasColumn = sourceColumn - transitionWindow.sourceStart
+    let sourceTileMetrics = layout.gridTileMetrics(columns: CGFloat(fromColumns), width: collectionView.bounds.width)
+    let targetTileMetrics = layout.gridTileMetrics(columns: CGFloat(toColumns), width: collectionView.bounds.width)
+    let sourceAnchorFrame = layout.frameForItem(
+      targetAssetIndex,
+      level: currentZoomLevel,
+      width: collectionView.bounds.width,
+      gridColumnOffset: currentGridColumnOffset
+    )
+    let targetAnchorFrame = layout.frameForItem(
+      targetAssetIndex,
+      level: target,
+      width: collectionView.bounds.width,
+      gridColumnOffset: targetGridColumnOffset
+    )
+    let sourceCanvasOrigin = CGPoint(
+      x: sourceAnchorFrame.minX - CGFloat(anchorCanvasColumn) * sourceTileMetrics.step,
+      y: sourceAnchorFrame.midY - sourceTileMetrics.tileSize / 2
+    )
+    let targetCanvasOrigin = CGPoint(
+      x: targetAnchorFrame.minX - CGFloat(anchorCanvasColumn) * targetTileMetrics.step,
+      y: sourceAnchorFrame.midY - targetTileMetrics.tileSize / 2
+    )
+    let sourceViewportAnchor = CGPoint(
+      x: sourceAnchorFrame.midX - collectionView.contentOffset.x,
+      y: sourceAnchorFrame.midY - collectionView.contentOffset.y
+    )
 
     let transition = AnchoredGridTransition(
       targetAssetIndex: targetAssetIndex,
-      contentCentroid: pinchCentroidInContent,
-      viewportCentroid: pinchCentroidInViewport,
-      anchorUnitPoint: pinchAnchorUnitPoint,
       fromColumns: fromColumns,
       toColumns: toColumns,
-      sourceGridOriginX: sourceGridOriginX,
-      targetGridOriginX: targetGridOriginX,
       sourceGridColumnOffset: currentGridColumnOffset,
       targetGridColumnOffset: targetGridColumnOffset,
-      continuousColumns: CGFloat(fromColumns),
+      sourceCanvasOrigin: sourceCanvasOrigin,
+      targetCanvasOrigin: targetCanvasOrigin,
+      sourceTileSize: sourceTileMetrics.tileSize,
+      sourceStep: sourceTileMetrics.step,
+      targetTileSize: targetTileMetrics.tileSize,
+      targetStep: targetTileMetrics.step,
+      sourceViewportAnchor: sourceViewportAnchor,
       geometryProgress: 0,
       contentProgress: 0,
       slots: slots
@@ -559,7 +586,6 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
     guard var transition = anchoredTransition else { return }
     let geometryProgress = smoothstep(progress)
     transition.geometryProgress = geometryProgress
-    transition.continuousColumns = CGFloat(transition.fromColumns) + (CGFloat(transition.toColumns) - CGFloat(transition.fromColumns)) * geometryProgress
     transition.contentProgress = transitionImageProgress(progress)
     anchoredTransition = transition
     layout.anchoredTransition = transition
@@ -600,8 +626,8 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
       let finalIndex = min(max(0, transition.targetAssetIndex), max(0, self.assets.count - 1))
       let finalOffset = self.restingContentOffset(
         anchorIndex: finalIndex,
-        unitPoint: transition.anchorUnitPoint,
-        viewportPoint: transition.viewportCentroid,
+        unitPoint: CGPoint(x: 0.5, y: 0.5),
+        viewportPoint: transition.sourceViewportAnchor,
         level: finalLevel,
         gridColumnOffset: finalGridColumnOffset
       )
@@ -979,6 +1005,13 @@ private final class TimelineZoomLayout: UICollectionViewLayout {
     frame(for: item, level: level, width: width, metrics: metrics(for: level, width: width))
   }
 
+  func frameForItem(_ item: Int, level: TimelineZoomLevel, width: CGFloat, gridColumnOffset: Int) -> CGRect {
+    let previousGridColumnOffset = self.gridColumnOffset
+    self.gridColumnOffset = gridColumnOffset
+    defer { self.gridColumnOffset = previousGridColumnOffset }
+    return frameForItem(item, level: level, width: width)
+  }
+
   func gridIndexPath(at point: CGPoint, level: TimelineZoomLevel, width: CGFloat) -> IndexPath? {
     guard let columns = level.columns else {
       return (0..<itemCount)
@@ -1149,26 +1182,25 @@ private final class TimelineZoomLayout: UICollectionViewLayout {
   }
 
   private func anchoredFrame(for slot: AnchoredGridSlot, transition: AnchoredGridTransition, width: CGFloat) -> CGRect {
-    let metrics = gridTileMetrics(columns: max(1, transition.continuousColumns), width: width)
-    let sourceContentOriginX = collectionView.map { $0.contentOffset.x + transition.sourceGridOriginX } ?? transition.sourceGridOriginX
-    let targetContentOriginX = collectionView.map { $0.contentOffset.x + transition.targetGridOriginX } ?? transition.targetGridOriginX
-    let originX = sourceContentOriginX + (targetContentOriginX - sourceContentOriginX) * transition.geometryProgress
-    return CGRect(
-      x: originX + CGFloat(slot.canvasColumn) * metrics.step,
-      y: transition.contentCentroid.y + CGFloat(slot.relativeRow) * metrics.step - metrics.tileSize * transition.anchorUnitPoint.y,
-      width: metrics.tileSize,
-      height: metrics.tileSize
+    let sourceFrame = CGRect(
+      x: transition.sourceCanvasOrigin.x + CGFloat(slot.canvasColumn) * transition.sourceStep,
+      y: transition.sourceCanvasOrigin.y + CGFloat(slot.relativeRow) * transition.sourceStep,
+      width: transition.sourceTileSize,
+      height: transition.sourceTileSize
     )
+    let targetFrame = CGRect(
+      x: transition.targetCanvasOrigin.x + CGFloat(slot.canvasColumn) * transition.targetStep,
+      y: transition.targetCanvasOrigin.y + CGFloat(slot.relativeRow) * transition.targetStep,
+      width: transition.targetTileSize,
+      height: transition.targetTileSize
+    )
+    return sourceFrame.interpolated(to: targetFrame, progress: transition.geometryProgress)
   }
 
   private func anchoredAlpha(for slot: AnchoredGridSlot, progress: CGFloat) -> CGFloat {
     switch (slot.sourceAssetIndex, slot.targetAssetIndex) {
-    case (.some, .some):
+    case (.some, .some), (.some, .none), (.none, .some):
       1
-    case (.some, .none):
-      1 - progress
-    case (.none, .some):
-      progress
     case (.none, .none):
       0
     }
@@ -1197,12 +1229,12 @@ private final class TimelineZoomLayout: UICollectionViewLayout {
     }
   }
 
-  private struct GridTileMetrics {
+  struct GridTileMetrics {
     let tileSize: CGFloat
     let step: CGFloat
   }
 
-  private func gridTileMetrics(columns: CGFloat, width: CGFloat) -> GridTileMetrics {
+  func gridTileMetrics(columns: CGFloat, width: CGFloat) -> GridTileMetrics {
     let columns = max(1, columns)
     let tileSize = floor((width - spacing * (columns + 1)) / columns)
     return GridTileMetrics(tileSize: tileSize, step: tileSize + spacing)
