@@ -188,6 +188,58 @@ public enum TimelineGridTransition {
     sourceOriginX + (targetOriginX - sourceOriginX) * progress
   }
 
+  public static func continuousZoomPosition(
+    startPosition: Double,
+    startScale: Double,
+    currentScale: Double,
+    scalePerLevel: Double,
+    minPosition: Double,
+    maxPosition: Double
+  ) -> Double {
+    precondition(startScale > 0, "startScale must be positive")
+    precondition(currentScale > 0, "currentScale must be positive")
+    precondition(scalePerLevel > 1, "scalePerLevel must be greater than 1")
+    precondition(minPosition <= maxPosition, "minPosition must not exceed maxPosition")
+
+    let positionDelta = log(currentScale / startScale) / log(scalePerLevel)
+    return min(maxPosition, max(minPosition, startPosition + positionDelta))
+  }
+
+  public static func nearestZoomPosition(_ position: Double, minPosition: Int, maxPosition: Int) -> Int {
+    precondition(minPosition <= maxPosition, "minPosition must not exceed maxPosition")
+    return min(maxPosition, max(minPosition, Int(position.rounded())))
+  }
+
+  public static func zoomSegmentIndices(
+    position: Double,
+    previousPosition: Double,
+    minPosition: Int,
+    maxPosition: Int
+  ) -> (from: Int, to: Int)? {
+    precondition(minPosition < maxPosition, "there must be at least two positions")
+
+    let clampedPosition = min(Double(maxPosition), max(Double(minPosition), position))
+    let isZoomingIn = clampedPosition >= previousPosition
+    let lowerIndex: Int
+    let upperIndex: Int
+
+    if isZoomingIn {
+      lowerIndex = min(maxPosition - 1, max(minPosition, Int(floor(clampedPosition))))
+      upperIndex = lowerIndex + 1
+    } else {
+      upperIndex = min(maxPosition, max(minPosition + 1, Int(ceil(clampedPosition))))
+      lowerIndex = upperIndex - 1
+    }
+
+    return isZoomingIn ? (lowerIndex, upperIndex) : (upperIndex, lowerIndex)
+  }
+
+  public static func zoomSegmentProgress(position: Double, fromPosition: Double, toPosition: Double) -> Double {
+    let distance = toPosition - fromPosition
+    guard abs(distance) > 0.0001 else { return 0 }
+    return min(1, max(0, (position - fromPosition) / distance))
+  }
+
   public static func hitTestGridIndex(
     x: Double,
     y: Double,

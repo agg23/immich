@@ -263,6 +263,66 @@ final class TimelineGridTransitionTests: XCTestCase {
     XCTAssertLessThanOrEqual(rightX, 390)
   }
 
+  func testContinuousZoomPositionMovesOneLevelPerScaleStep() {
+    XCTAssertEqual(TimelineGridTransition.continuousZoomPosition(
+      startPosition: 0,
+      startScale: 1,
+      currentScale: 1,
+      scalePerLevel: 1.65,
+      minPosition: 0,
+      maxPosition: 2
+    ), 0, accuracy: 0.0001)
+    XCTAssertEqual(TimelineGridTransition.continuousZoomPosition(
+      startPosition: 0,
+      startScale: 1,
+      currentScale: 1.65,
+      scalePerLevel: 1.65,
+      minPosition: 0,
+      maxPosition: 2
+    ), 1, accuracy: 0.0001)
+    XCTAssertEqual(TimelineGridTransition.continuousZoomPosition(
+      startPosition: 0,
+      startScale: 1,
+      currentScale: 1.65 * 1.65,
+      scalePerLevel: 1.65,
+      minPosition: 0,
+      maxPosition: 2
+    ), 2, accuracy: 0.0001)
+  }
+
+  func testContinuousZoomPositionClampsWhenReversingFromThreeColumns() {
+    XCTAssertEqual(TimelineGridTransition.continuousZoomPosition(
+      startPosition: 2,
+      startScale: 1,
+      currentScale: 1 / 1.65,
+      scalePerLevel: 1.65,
+      minPosition: 0,
+      maxPosition: 2
+    ), 1, accuracy: 0.0001)
+    XCTAssertEqual(TimelineGridTransition.continuousZoomPosition(
+      startPosition: 2,
+      startScale: 1,
+      currentScale: 1 / (1.65 * 1.65 * 1.65),
+      scalePerLevel: 1.65,
+      minPosition: 0,
+      maxPosition: 2
+    ), 0, accuracy: 0.0001)
+  }
+
+  func testZoomSegmentIndicesFollowPinchDirectionAtBoundaries() {
+    XCTAssertEqual(TimelineGridTransition.zoomSegmentIndices(position: 1.25, previousPosition: 0.75, minPosition: 0, maxPosition: 2)?.from, 1)
+    XCTAssertEqual(TimelineGridTransition.zoomSegmentIndices(position: 1.25, previousPosition: 0.75, minPosition: 0, maxPosition: 2)?.to, 2)
+    XCTAssertEqual(TimelineGridTransition.zoomSegmentIndices(position: 0.75, previousPosition: 1.25, minPosition: 0, maxPosition: 2)?.from, 1)
+    XCTAssertEqual(TimelineGridTransition.zoomSegmentIndices(position: 0.75, previousPosition: 1.25, minPosition: 0, maxPosition: 2)?.to, 0)
+  }
+
+  func testZoomSegmentProgressSupportsBothDirections() {
+    XCTAssertEqual(TimelineGridTransition.zoomSegmentProgress(position: 0.25, fromPosition: 0, toPosition: 1), 0.25, accuracy: 0.0001)
+    XCTAssertEqual(TimelineGridTransition.zoomSegmentProgress(position: 0.75, fromPosition: 1, toPosition: 0), 0.25, accuracy: 0.0001)
+    XCTAssertEqual(TimelineGridTransition.nearestZoomPosition(1.49, minPosition: 0, maxPosition: 2), 1)
+    XCTAssertEqual(TimelineGridTransition.nearestZoomPosition(1.5, minPosition: 0, maxPosition: 2), 2)
+  }
+
   func testHitTestingSelectsExactSourceColumnUnderPoint() {
     let width = 390.0
     let spacing = 2.0
