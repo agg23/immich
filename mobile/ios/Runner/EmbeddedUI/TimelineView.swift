@@ -308,6 +308,56 @@ private struct AnchoredGridTransition: Equatable {
   let slots: [AnchoredGridSlot]
 }
 
+private struct FrameTimelineSlot: Equatable {
+  let sourceAssetIndex: Int?
+  let targetAssetIndex: Int?
+  let sourceFrame: CGRect?
+  let targetFrame: CGRect?
+  let zIndex: Int
+}
+
+private struct FrameTimelineTransition: Equatable {
+  let anchorAssetIndex: Int
+  let fromLevel: TimelineZoomLevel
+  let toLevel: TimelineZoomLevel
+  let sourceGridColumnOffset: Int
+  let targetGridColumnOffset: Int
+  let sourceViewportAnchor: CGPoint
+  let targetFrameOffset: CGPoint
+  var geometryProgress: CGFloat
+  var contentProgress: CGFloat
+  let slots: [FrameTimelineSlot]
+}
+
+private struct SingleColumnZoomSlot: Equatable {
+  let relativeRow: Int
+  let canvasColumn: Int
+  let sourceAssetIndex: Int?
+  let targetAssetIndex: Int?
+
+  var zIndex: Int {
+    20_000 - abs(relativeRow) * 100 + (canvasColumn == 0 ? 50 : -abs(canvasColumn))
+  }
+}
+
+private struct SingleColumnZoomTransition: Equatable {
+  let anchorAssetIndex: Int
+  let fromLevel: TimelineZoomLevel
+  let toLevel: TimelineZoomLevel
+  let sourceGridColumnOffset: Int
+  let targetGridColumnOffset: Int
+  let gridCanvasOrigin: CGPoint
+  let singleColumnCanvasOrigin: CGPoint
+  let gridTileSize: CGFloat
+  let gridStep: CGFloat
+  let singleColumnTileSize: CGFloat
+  let singleColumnStep: CGFloat
+  let sourceViewportAnchor: CGPoint
+  var geometryProgress: CGFloat
+  var contentProgress: CGFloat
+  let slots: [SingleColumnZoomSlot]
+}
+
 private struct GridZoomSegment: Equatable {
   let fromLevel: TimelineZoomLevel
   let toLevel: TimelineZoomLevel
@@ -345,14 +395,17 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
 
   private var presentationMode: PresentationMode = .resting
   private var anchoredTransition: AnchoredGridTransition?
+  private var singleColumnZoomTransition: SingleColumnZoomTransition?
+  private var frameTransition: FrameTimelineTransition?
   private var currentZoomLevel: TimelineZoomLevel = .threeColumns
   private var currentGridColumnOffset = 0
-  private let gridZoomLevels: [TimelineZoomLevel] = [.sevenColumns, .fiveColumns, .threeColumns]
+  private let gridZoomLevels: [TimelineZoomLevel] = [.sevenColumns, .fiveColumns, .threeColumns, .oneColumnAspect]
   private let gridZoomScalePerLevel: CGFloat = 1.65
   private var gridPinchSession: GridPinchSession?
   private var pinchBaselineScale: CGFloat = 1
   private var pinchTransitionTarget: TimelineZoomLevel?
   private var pinchTransitionProgress: CGFloat = 0
+  private var pinchTransitionGeneration = 0
   private var wasScrollEnabledBeforePinch = true
   private var pinchTargetAssetIndex: Int?
   private var pinchStartContentOffset: CGPoint = .zero
@@ -417,9 +470,18 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
   func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
     switch presentationMode {
     case .resting:
-      assets.count
+      return assets.count
     case .transitioning:
-      anchoredTransition?.slots.count ?? 0
+      if let anchoredTransition {
+        return anchoredTransition.slots.count
+      }
+      if let singleColumnZoomTransition {
+        return singleColumnZoomTransition.slots.count
+      }
+      if let frameTransition {
+        return frameTransition.slots.count
+      }
+      return 0
     }
   }
 
@@ -437,13 +499,32 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
         await viewModel?.loadMoreIfNeeded(visibleIndex: indexPath.item)
       }
     case .transitioning:
-      guard let transition = anchoredTransition,
-            transition.slots.indices.contains(indexPath.item) else { return cell }
-      let slot = transition.slots[indexPath.item]
-      configure(cell: cell, for: slot, progress: transition.contentProgress)
-      if enablePinchTargetDebugHighlight {
-        let isPinchTarget = slot.sourceAssetIndex == transition.targetAssetIndex || slot.targetAssetIndex == transition.targetAssetIndex
-        cell.setDebugPinchTargetHighlight(isPinchTarget ? pinchAnchorDebugSource : nil)
+      if let transition = anchoredTransition,
+         transition.slots.indices.contains(indexPath.item) {
+        let slot = transition.slots[indexPath.item]
+        configure(cell: cell, for: slot, progress: transition.contentProgress)
+        if enablePinchTargetDebugHighlight {
+          let isPinchTarget = slot.sourceAssetIndex == transition.targetAssetIndex || slot.targetAssetIndex == transition.targetAssetIndex
+          cell.setDebugPinchTargetHighlight(isPinchTarget ? pinchAnchorDebugSource : nil)
+        }
+      } else if let transition = singleColumnZoomTransition,
+                transition.slots.indices.contains(indexPath.item) {
+        let slot = transition.slots[indexPath.item]
+        configure(cell: cell, for: slot, progress: transition.contentProgress)
+        if enablePinchTargetDebugHighlight {
+          let isPinchTarget = slot.sourceAssetIndex == transition.anchorAssetIndex || slot.targetAssetIndex == transition.anchorAssetIndex
+          cell.setDebugPinchTargetHighlight(isPinchTarget ? pinchAnchorDebugSource : nil)
+        }
+      } else if let transition = frameTransition,
+                transition.slots.indices.contains(indexPath.item) {
+        let slot = transition.slots[indexPath.item]
+        configure(cell: cell, for: slot, progress: transition.contentProgress)
+        if enablePinchTargetDebugHighlight {
+          let isPinchTarget = slot.sourceAssetIndex == transition.anchorAssetIndex || slot.targetAssetIndex == transition.anchorAssetIndex
+          cell.setDebugPinchTargetHighlight(isPinchTarget ? pinchAnchorDebugSource : nil)
+        }
+      } else {
+        cell.setDebugPinchTargetHighlight(nil)
       }
     }
 
@@ -487,7 +568,19 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
   }
 
   private func configure(cell: TimelineThumbnailCollectionCell, for slot: AnchoredGridSlot, progress: CGFloat) {
-    switch (slot.sourceAssetIndex, slot.targetAssetIndex) {
+    configure(cell: cell, sourceIndex: slot.sourceAssetIndex, targetIndex: slot.targetAssetIndex, progress: progress)
+  }
+
+  private func configure(cell: TimelineThumbnailCollectionCell, for slot: SingleColumnZoomSlot, progress: CGFloat) {
+    configure(cell: cell, sourceIndex: slot.sourceAssetIndex, targetIndex: slot.targetAssetIndex, progress: progress)
+  }
+
+  private func configure(cell: TimelineThumbnailCollectionCell, for slot: FrameTimelineSlot, progress: CGFloat) {
+    configure(cell: cell, sourceIndex: slot.sourceAssetIndex, targetIndex: slot.targetAssetIndex, progress: progress)
+  }
+
+  private func configure(cell: TimelineThumbnailCollectionCell, sourceIndex: Int?, targetIndex: Int?, progress: CGFloat) {
+    switch (sourceIndex, targetIndex) {
     case let (.some(sourceIndex), .some(targetIndex))
       where assets.indices.contains(sourceIndex) && assets.indices.contains(targetIndex):
       cell.configureTransition(source: assets[sourceIndex], target: assets[targetIndex], progress: progress)
@@ -501,6 +594,11 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
   }
 
   private func beginGridPinchSession(gesture: UIPinchGestureRecognizer) {
+    guard presentationMode == .resting else {
+      NSLog("[EmbeddedUI] Ignoring pinch begin while mode=\(presentationMode) level=\(currentZoomLevel)")
+      return
+    }
+
     pinchBaselineScale = gesture.scale
     pinchTransitionTarget = nil
     pinchTransitionProgress = 0
@@ -516,7 +614,6 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
 
     guard let anchorAssetIndex = pinchTargetAssetIndex,
           assets.indices.contains(anchorAssetIndex),
-          currentZoomLevel.columns != nil,
           let startPosition = gridZoomPosition(for: currentZoomLevel) else {
       if enablePinchTargetDebugHighlight {
         updateDebugPinchTargetHighlight()
@@ -524,25 +621,27 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
       return
     }
 
+    let startGridColumnOffset = currentZoomLevel == .oneColumnAspect ? 0 : currentGridColumnOffset
     let sourceAnchorFrame = layout.frameForItem(
       anchorAssetIndex,
       level: currentZoomLevel,
       width: collectionView.bounds.width,
-      gridColumnOffset: currentGridColumnOffset
+      gridColumnOffset: startGridColumnOffset
     )
     let sourceViewportAnchor = CGPoint(
       x: sourceAnchorFrame.midX - collectionView.contentOffset.x,
       y: sourceAnchorFrame.midY - collectionView.contentOffset.y
     )
+    NSLog("[EmbeddedUI] Pinch begin level=\(currentZoomLevel) anchor=\(anchorAssetIndex) offset=\(startGridColumnOffset)")
     gridPinchSession = GridPinchSession(
       anchorAssetIndex: anchorAssetIndex,
       startScale: gesture.scale,
       startLevel: currentZoomLevel,
       startPosition: startPosition,
-      startGridColumnOffset: currentGridColumnOffset,
+      startGridColumnOffset: startGridColumnOffset,
       sourceViewportAnchor: sourceViewportAnchor,
       sourceAnchorContentCenterY: sourceAnchorFrame.midY,
-      levelGridColumnOffsets: gridColumnOffsets(anchorIndex: anchorAssetIndex, startLevel: currentZoomLevel, startGridColumnOffset: currentGridColumnOffset),
+      levelGridColumnOffsets: gridColumnOffsets(anchorIndex: anchorAssetIndex, startLevel: currentZoomLevel, startGridColumnOffset: startGridColumnOffset),
       currentPosition: startPosition,
       activeSegment: nil
     )
@@ -563,14 +662,24 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
     }
 
     pinchTransitionTarget = segment.toLevel
-    if session.activeSegment != segment || anchoredTransition == nil {
+    let isSingleColumnSegment = segment.fromLevel == .oneColumnAspect || segment.toLevel == .oneColumnAspect
+    let transitionMissing = isSingleColumnSegment ? singleColumnZoomTransition == nil : anchoredTransition == nil
+    if session.activeSegment != segment || transitionMissing {
       session.activeSegment = segment
       gridPinchSession = session
-      beginSlotTransition(
-        segment: segment,
-        sourceViewportAnchor: session.sourceViewportAnchor,
-        sourceAnchorContentCenterY: session.sourceAnchorContentCenterY
-      )
+      if isSingleColumnSegment {
+        beginSingleColumnZoomTransition(
+          segment: segment,
+          sourceViewportAnchor: session.sourceViewportAnchor,
+          sourceAnchorContentCenterY: session.sourceAnchorContentCenterY
+        )
+      } else {
+        beginSlotTransition(
+          segment: segment,
+          sourceViewportAnchor: session.sourceViewportAnchor,
+          sourceAnchorContentCenterY: session.sourceAnchorContentCenterY
+        )
+      }
     } else {
       gridPinchSession = session
     }
@@ -586,16 +695,32 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
     }
 
     guard presentationMode == .transitioning,
-          let segment = session.activeSegment,
-          let transition = anchoredTransition else {
+          let segment = session.activeSegment else {
       abortPinchInteraction()
       return
     }
 
+    let completionGeneration = pinchTransitionGeneration
     let finalLevel = cancelled ? session.startLevel : nearestGridZoomLevel(to: session.currentPosition)
-    let finalGridColumnOffset = session.levelGridColumnOffsets[finalLevel] ?? session.startGridColumnOffset
+    let finalGridColumnOffset = finalLevel == .oneColumnAspect ? 0 : session.levelGridColumnOffsets[finalLevel] ?? session.startGridColumnOffset
     let finalSegmentProgress: CGFloat = finalLevel == segment.toLevel ? 1 : 0
+    let finalIndex: Int
+    let sourceViewportAnchor: CGPoint
+    if let transition = anchoredTransition {
+      finalIndex = min(max(0, transition.targetAssetIndex), max(0, assets.count - 1))
+      sourceViewportAnchor = transition.sourceViewportAnchor
+    } else if let transition = singleColumnZoomTransition {
+      finalIndex = min(max(0, transition.anchorAssetIndex), max(0, assets.count - 1))
+      sourceViewportAnchor = transition.sourceViewportAnchor
+    } else if let transition = frameTransition {
+      finalIndex = min(max(0, transition.anchorAssetIndex), max(0, assets.count - 1))
+      sourceViewportAnchor = transition.sourceViewportAnchor
+    } else {
+      abortPinchInteraction()
+      return
+    }
 
+    NSLog("[EmbeddedUI] Pinch finish target=\(finalLevel) progress=\(finalSegmentProgress) cancelled=\(cancelled) generation=\(completionGeneration)")
     UIView.animate(
       withDuration: 0.18,
       delay: 0,
@@ -604,11 +729,14 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
       self.updateSlotTransition(progress: finalSegmentProgress)
       self.collectionView.layoutIfNeeded()
     } completion: { _ in
-      let finalIndex = min(max(0, transition.targetAssetIndex), max(0, self.assets.count - 1))
+      guard completionGeneration == self.pinchTransitionGeneration else {
+        NSLog("[EmbeddedUI] Ignoring stale pinch completion generation=\(completionGeneration) current=\(self.pinchTransitionGeneration)")
+        return
+      }
       let finalOffset = self.restingContentOffset(
         anchorIndex: finalIndex,
         unitPoint: CGPoint(x: 0.5, y: 0.5),
-        viewportPoint: session.sourceViewportAnchor,
+        viewportPoint: sourceViewportAnchor,
         level: finalLevel,
         gridColumnOffset: finalGridColumnOffset
       )
@@ -619,7 +747,11 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
       UIView.performWithoutAnimation {
         self.presentationMode = .resting
         self.anchoredTransition = nil
+        self.singleColumnZoomTransition = nil
+        self.frameTransition = nil
         self.layout.anchoredTransition = nil
+        self.layout.singleColumnZoomTransition = nil
+        self.layout.frameTransition = nil
         self.layout.currentZoomLevel = self.currentZoomLevel
         self.layout.gridColumnOffset = self.currentGridColumnOffset
         self.collectionView.setContentOffset(finalOffset, animated: false)
@@ -668,10 +800,8 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
     let toIndex = isZoomingIn ? upperIndex : lowerIndex
     let fromLevel = gridZoomLevels[fromIndex]
     let toLevel = gridZoomLevels[toIndex]
-    guard let sourceGridColumnOffset = offsets[fromLevel],
-          let targetGridColumnOffset = offsets[toLevel] else {
-      return nil
-    }
+    let sourceGridColumnOffset = offsets[fromLevel] ?? 0
+    let targetGridColumnOffset = offsets[toLevel] ?? 0
 
     return GridZoomSegment(
       fromLevel: fromLevel,
@@ -703,7 +833,8 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
       return [startLevel: startGridColumnOffset]
     }
 
-    var offsets: [TimelineZoomLevel: Int] = [startLevel: startGridColumnOffset]
+    var offsets: [TimelineZoomLevel: Int] = [.oneColumnAspect: 0]
+    offsets[startLevel] = startGridColumnOffset
     if startIndex < gridZoomLevels.count - 1 {
       for index in (startIndex + 1)..<gridZoomLevels.count {
         let fromLevel = gridZoomLevels[index - 1]
@@ -747,6 +878,14 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
     fromGridColumnOffset: Int,
     toLevel: TimelineZoomLevel
   ) -> Int? {
+    if toLevel == .oneColumnAspect {
+      return 0
+    }
+    if fromLevel == .oneColumnAspect {
+      guard let toColumns = toLevel.columns else { return nil }
+      let desiredColumn = min(toColumns - 1, max(0, (toColumns - 1) / 2))
+      return layout.columnOffset(anchorIndex: anchorIndex, columns: toColumns, desiredColumn: desiredColumn)
+    }
     guard let fromColumns = fromLevel.columns,
           let toColumns = toLevel.columns else {
       return nil
@@ -854,33 +993,228 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
       slots: slots
     )
 
+    pinchTransitionGeneration += 1
+    NSLog("[EmbeddedUI] Grid transition begin \(segment.fromLevel)->\(segment.toLevel) generation=\(pinchTransitionGeneration)")
     anchoredTransition = transition
+    singleColumnZoomTransition = nil
+    frameTransition = nil
     pinchTransitionProgress = 0
     prewarmTransitionThumbnails(for: transition.slots)
     presentationMode = .transitioning
     layout.anchoredTransition = transition
+    layout.singleColumnZoomTransition = nil
+    layout.frameTransition = nil
+    collectionView.isScrollEnabled = false
+    collectionView.reloadData()
+  }
+
+  private func beginSingleColumnZoomTransition(
+    segment: GridZoomSegment,
+    sourceViewportAnchor: CGPoint,
+    sourceAnchorContentCenterY: CGFloat
+  ) {
+    guard let anchorAssetIndex = pinchTargetAssetIndex,
+          assets.indices.contains(anchorAssetIndex),
+          segment.fromLevel == .threeColumns || segment.toLevel == .threeColumns else {
+      return
+    }
+
+    let slots = makeSingleColumnZoomSlots(
+      anchorAssetIndex: anchorAssetIndex,
+      fromLevel: segment.fromLevel,
+      toLevel: segment.toLevel,
+      sourceGridColumnOffset: segment.sourceGridColumnOffset,
+      targetGridColumnOffset: segment.targetGridColumnOffset
+    )
+    guard !slots.isEmpty else { return }
+
+    let gridLevel: TimelineZoomLevel = segment.fromLevel == .threeColumns ? segment.fromLevel : segment.toLevel
+    let gridOffset = segment.fromLevel == .threeColumns ? segment.sourceGridColumnOffset : segment.targetGridColumnOffset
+    let gridTileMetrics = layout.gridTileMetrics(columns: 3, width: collectionView.bounds.width)
+    let gridAnchorFrame = layout.frameForItem(
+      anchorAssetIndex,
+      level: gridLevel,
+      width: collectionView.bounds.width,
+      gridColumnOffset: gridOffset
+    )
+    let gridCanvasOrigin = CGPoint(
+      x: gridAnchorFrame.minX,
+      y: sourceAnchorContentCenterY - gridTileMetrics.tileSize / 2
+    )
+    let singleColumnTileSize = collectionView.bounds.width
+    let singleColumnStep = singleColumnTileSize + spacing
+    let singleColumnCanvasOrigin = CGPoint(
+      x: 0,
+      y: sourceAnchorContentCenterY - singleColumnTileSize / 2
+    )
+
+    let transition = SingleColumnZoomTransition(
+      anchorAssetIndex: anchorAssetIndex,
+      fromLevel: segment.fromLevel,
+      toLevel: segment.toLevel,
+      sourceGridColumnOffset: segment.sourceGridColumnOffset,
+      targetGridColumnOffset: segment.targetGridColumnOffset,
+      gridCanvasOrigin: gridCanvasOrigin,
+      singleColumnCanvasOrigin: singleColumnCanvasOrigin,
+      gridTileSize: gridTileMetrics.tileSize,
+      gridStep: gridTileMetrics.step,
+      singleColumnTileSize: singleColumnTileSize,
+      singleColumnStep: singleColumnStep,
+      sourceViewportAnchor: sourceViewportAnchor,
+      geometryProgress: 0,
+      contentProgress: 0,
+      slots: slots
+    )
+
+    pinchTransitionGeneration += 1
+    NSLog("[EmbeddedUI] Single-column transition begin \(segment.fromLevel)->\(segment.toLevel) anchor=\(anchorAssetIndex) slots=\(slots.count) generation=\(pinchTransitionGeneration)")
+    singleColumnZoomTransition = transition
+    anchoredTransition = nil
+    frameTransition = nil
+    pinchTransitionProgress = 0
+    prewarmTransitionThumbnails(for: transition.slots)
+    presentationMode = .transitioning
+    layout.singleColumnZoomTransition = transition
+    layout.anchoredTransition = nil
+    layout.frameTransition = nil
+    collectionView.isScrollEnabled = false
+    collectionView.reloadData()
+  }
+
+  private func beginFrameTransition(segment: GridZoomSegment, sourceViewportAnchor: CGPoint) {
+    guard let anchorAssetIndex = pinchTargetAssetIndex,
+          assets.indices.contains(anchorAssetIndex) else {
+      return
+    }
+
+    let radius = 24
+    let lowerBound = max(0, anchorAssetIndex - radius)
+    let upperBound = min(max(0, assets.count - 1), anchorAssetIndex + radius)
+    guard lowerBound <= upperBound else { return }
+
+    let sourceAnchorFrame = layout.frameForItem(
+      anchorAssetIndex,
+      level: segment.fromLevel,
+      width: collectionView.bounds.width,
+      gridColumnOffset: segment.sourceGridColumnOffset
+    )
+    let targetAnchorFrame = layout.frameForItem(
+      anchorAssetIndex,
+      level: segment.toLevel,
+      width: collectionView.bounds.width,
+      gridColumnOffset: segment.targetGridColumnOffset
+    )
+    let targetFrameOffset = CGPoint(
+      x: 0,
+      y: sourceAnchorFrame.midY - targetAnchorFrame.midY
+    )
+
+    let slots = (lowerBound...upperBound).map { index in
+      let sourceFrame = layout.frameForItem(
+        index,
+        level: segment.fromLevel,
+        width: collectionView.bounds.width,
+        gridColumnOffset: segment.sourceGridColumnOffset
+      )
+      let targetFrame = layout.frameForItem(
+        index,
+        level: segment.toLevel,
+        width: collectionView.bounds.width,
+        gridColumnOffset: segment.targetGridColumnOffset
+      )
+      return FrameTimelineSlot(
+        sourceAssetIndex: index,
+        targetAssetIndex: index,
+        sourceFrame: sourceFrame,
+        targetFrame: targetFrame,
+        zIndex: 10_000 - abs(index - anchorAssetIndex)
+      )
+    }
+
+    let transition = FrameTimelineTransition(
+      anchorAssetIndex: anchorAssetIndex,
+      fromLevel: segment.fromLevel,
+      toLevel: segment.toLevel,
+      sourceGridColumnOffset: segment.sourceGridColumnOffset,
+      targetGridColumnOffset: segment.targetGridColumnOffset,
+      sourceViewportAnchor: sourceViewportAnchor,
+      targetFrameOffset: targetFrameOffset,
+      geometryProgress: 0,
+      contentProgress: 0,
+      slots: slots
+    )
+
+    pinchTransitionGeneration += 1
+    NSLog("[EmbeddedUI] Frame transition begin \(segment.fromLevel)->\(segment.toLevel) anchor=\(anchorAssetIndex) slots=\(slots.count) targetOffset=\(targetFrameOffset) generation=\(pinchTransitionGeneration)")
+    frameTransition = transition
+    anchoredTransition = nil
+    pinchTransitionProgress = 0
+    prewarmTransitionThumbnails(for: transition.slots)
+    presentationMode = .transitioning
+    layout.frameTransition = transition
+    layout.anchoredTransition = nil
     collectionView.isScrollEnabled = false
     collectionView.reloadData()
   }
 
   private func updateSlotTransition(progress: CGFloat) {
     pinchTransitionProgress = progress
-    guard var transition = anchoredTransition else { return }
     let geometryProgress = smoothstep(progress)
-    transition.geometryProgress = geometryProgress
-    transition.contentProgress = transitionImageProgress(progress)
-    anchoredTransition = transition
-    layout.anchoredTransition = transition
-    collectionView.collectionViewLayout.invalidateLayout()
-    collectionView.visibleCells.forEach { cell in
-      guard let cell = cell as? TimelineThumbnailCollectionCell,
-            let indexPath = collectionView.indexPath(for: cell),
-            transition.slots.indices.contains(indexPath.item),
-            let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
-        return
+
+    if var transition = anchoredTransition {
+      transition.geometryProgress = geometryProgress
+      transition.contentProgress = transitionImageProgress(progress)
+      anchoredTransition = transition
+      layout.anchoredTransition = transition
+      collectionView.collectionViewLayout.invalidateLayout()
+      collectionView.visibleCells.forEach { cell in
+        guard let cell = cell as? TimelineThumbnailCollectionCell,
+              let indexPath = collectionView.indexPath(for: cell),
+              transition.slots.indices.contains(indexPath.item),
+              let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
+          return
+        }
+        cell.alpha = attributes.alpha
+        configure(cell: cell, for: transition.slots[indexPath.item], progress: transition.contentProgress)
       }
-      cell.alpha = attributes.alpha
-      configure(cell: cell, for: transition.slots[indexPath.item], progress: transition.contentProgress)
+      return
+    }
+
+    if var transition = singleColumnZoomTransition {
+      transition.geometryProgress = geometryProgress
+      transition.contentProgress = transitionImageProgress(progress)
+      singleColumnZoomTransition = transition
+      layout.singleColumnZoomTransition = transition
+      collectionView.collectionViewLayout.invalidateLayout()
+      collectionView.visibleCells.forEach { cell in
+        guard let cell = cell as? TimelineThumbnailCollectionCell,
+              let indexPath = collectionView.indexPath(for: cell),
+              transition.slots.indices.contains(indexPath.item),
+              let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
+          return
+        }
+        cell.alpha = attributes.alpha
+        configure(cell: cell, for: transition.slots[indexPath.item], progress: transition.contentProgress)
+      }
+      return
+    }
+
+    if var transition = frameTransition {
+      transition.geometryProgress = geometryProgress
+      transition.contentProgress = transitionImageProgress(progress)
+      frameTransition = transition
+      layout.frameTransition = transition
+      collectionView.collectionViewLayout.invalidateLayout()
+      collectionView.visibleCells.forEach { cell in
+        guard let cell = cell as? TimelineThumbnailCollectionCell,
+              let indexPath = collectionView.indexPath(for: cell),
+              transition.slots.indices.contains(indexPath.item),
+              let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
+          return
+        }
+        cell.alpha = attributes.alpha
+        configure(cell: cell, for: transition.slots[indexPath.item], progress: transition.contentProgress)
+      }
     }
   }
 
@@ -892,6 +1226,7 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
       return
     }
 
+    let completionGeneration = pinchTransitionGeneration
     let shouldCommit = !cancelled && pinchTransitionProgress >= 0.42
     let finalProgress: CGFloat = shouldCommit ? 1 : 0
 
@@ -903,6 +1238,10 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
       self.updateSlotTransition(progress: finalProgress)
       self.collectionView.layoutIfNeeded()
     } completion: { _ in
+      guard completionGeneration == self.pinchTransitionGeneration else {
+        NSLog("[EmbeddedUI] Ignoring stale legacy pinch completion generation=\(completionGeneration) current=\(self.pinchTransitionGeneration)")
+        return
+      }
       let finalLevel = shouldCommit ? target : TimelineZoomLevel(columns: transition.fromColumns)
       let finalGridColumnOffset = shouldCommit ? transition.targetGridColumnOffset : transition.sourceGridColumnOffset
       let finalIndex = min(max(0, transition.targetAssetIndex), max(0, self.assets.count - 1))
@@ -920,7 +1259,11 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
       UIView.performWithoutAnimation {
         self.presentationMode = .resting
         self.anchoredTransition = nil
+        self.singleColumnZoomTransition = nil
+        self.frameTransition = nil
         self.layout.anchoredTransition = nil
+        self.layout.singleColumnZoomTransition = nil
+        self.layout.frameTransition = nil
         self.layout.currentZoomLevel = self.currentZoomLevel
         self.layout.gridColumnOffset = self.currentGridColumnOffset
         self.collectionView.setContentOffset(finalOffset, animated: false)
@@ -991,6 +1334,57 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
     return slots.sorted { $0.zIndex < $1.zIndex }
   }
 
+  private func makeSingleColumnZoomSlots(
+    anchorAssetIndex: Int,
+    fromLevel: TimelineZoomLevel,
+    toLevel: TimelineZoomLevel,
+    sourceGridColumnOffset: Int,
+    targetGridColumnOffset: Int
+  ) -> [SingleColumnZoomSlot] {
+    let rowRadius = Int(ceil(collectionView.bounds.height / max(1, collectionView.bounds.width / 3))) + 4
+    let isZoomingToSingleColumn = toLevel == .oneColumnAspect
+    let gridOffset = isZoomingToSingleColumn ? sourceGridColumnOffset : targetGridColumnOffset
+    let gridAnchorColumn = layout.column(for: anchorAssetIndex, columns: 3, columnOffset: gridOffset)
+    let gridColumnWindow = layout.relativeColumnWindow(anchorColumn: gridAnchorColumn, columns: 3)
+    var slots: [SingleColumnZoomSlot] = []
+
+    for row in (-rowRadius)...rowRadius {
+      let chronologicalIndex = anchorAssetIndex + row
+      for canvasColumn in gridColumnWindow.lowerBound...gridColumnWindow.upperBound {
+        let gridIndex = gridColumnWindow.contains(canvasColumn)
+          ? indexAtGridOffset(
+            anchorIndex: anchorAssetIndex,
+            columns: 3,
+            gridColumnOffset: gridOffset,
+            relativeRow: row,
+            relativeColumn: canvasColumn
+          )
+          : nil
+        let chronologicalAssetIndex = assets.indices.contains(chronologicalIndex) ? chronologicalIndex : nil
+        let sourceAssetIndex: Int?
+        let targetAssetIndex: Int?
+
+        if isZoomingToSingleColumn {
+          sourceAssetIndex = gridIndex
+          targetAssetIndex = canvasColumn == 0 ? chronologicalAssetIndex : nil
+        } else {
+          sourceAssetIndex = canvasColumn == 0 ? chronologicalAssetIndex : nil
+          targetAssetIndex = gridIndex
+        }
+
+        guard sourceAssetIndex != nil || targetAssetIndex != nil else { continue }
+        slots.append(SingleColumnZoomSlot(
+          relativeRow: row,
+          canvasColumn: canvasColumn,
+          sourceAssetIndex: sourceAssetIndex,
+          targetAssetIndex: targetAssetIndex
+        ))
+      }
+    }
+
+    return slots.sorted { $0.zIndex < $1.zIndex }
+  }
+
   private func indexAtGridOffset(
     anchorIndex: Int,
     columns: Int,
@@ -1008,7 +1402,18 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
   }
 
   private func prewarmTransitionThumbnails(for slots: [AnchoredGridSlot]) {
-    let indices = Set(slots.flatMap { [$0.sourceAssetIndex, $0.targetAssetIndex].compactMap { $0 } })
+    prewarmTransitionThumbnails(indices: Set(slots.flatMap { [$0.sourceAssetIndex, $0.targetAssetIndex].compactMap { $0 } }))
+  }
+
+  private func prewarmTransitionThumbnails(for slots: [SingleColumnZoomSlot]) {
+    prewarmTransitionThumbnails(indices: Set(slots.flatMap { [$0.sourceAssetIndex, $0.targetAssetIndex].compactMap { $0 } }))
+  }
+
+  private func prewarmTransitionThumbnails(for slots: [FrameTimelineSlot]) {
+    prewarmTransitionThumbnails(indices: Set(slots.flatMap { [$0.sourceAssetIndex, $0.targetAssetIndex].compactMap { $0 } }))
+  }
+
+  private func prewarmTransitionThumbnails(indices: Set<Int>) {
     for index in indices where assets.indices.contains(index) {
       let asset = assets[index]
       guard let remoteId = asset.remoteId else { continue }
@@ -1111,14 +1516,24 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
       case .resting:
         cell.setDebugPinchTargetHighlight(indexPath.item == pinchTargetAssetIndex ? pinchAnchorDebugSource : nil)
       case .transitioning:
-        guard let transition = anchoredTransition,
-              transition.slots.indices.contains(indexPath.item) else {
+        if let transition = anchoredTransition,
+           transition.slots.indices.contains(indexPath.item) {
+          let slot = transition.slots[indexPath.item]
+          let isPinchTarget = slot.sourceAssetIndex == transition.targetAssetIndex || slot.targetAssetIndex == transition.targetAssetIndex
+          cell.setDebugPinchTargetHighlight(isPinchTarget ? pinchAnchorDebugSource : nil)
+        } else if let transition = singleColumnZoomTransition,
+                  transition.slots.indices.contains(indexPath.item) {
+          let slot = transition.slots[indexPath.item]
+          let isPinchTarget = slot.sourceAssetIndex == transition.anchorAssetIndex || slot.targetAssetIndex == transition.anchorAssetIndex
+          cell.setDebugPinchTargetHighlight(isPinchTarget ? pinchAnchorDebugSource : nil)
+        } else if let transition = frameTransition,
+                  transition.slots.indices.contains(indexPath.item) {
+          let slot = transition.slots[indexPath.item]
+          let isPinchTarget = slot.sourceAssetIndex == transition.anchorAssetIndex || slot.targetAssetIndex == transition.anchorAssetIndex
+          cell.setDebugPinchTargetHighlight(isPinchTarget ? pinchAnchorDebugSource : nil)
+        } else {
           cell.setDebugPinchTargetHighlight(nil)
-          return
         }
-        let slot = transition.slots[indexPath.item]
-        let isPinchTarget = slot.sourceAssetIndex == transition.targetAssetIndex || slot.targetAssetIndex == transition.targetAssetIndex
-        cell.setDebugPinchTargetHighlight(isPinchTarget ? pinchAnchorDebugSource : nil)
       }
     }
   }
@@ -1143,10 +1558,16 @@ private final class TimelineCollectionViewController: UIViewController, UICollec
   }
 
   private func abortPinchInteraction() {
+    pinchTransitionGeneration += 1
+    NSLog("[EmbeddedUI] Aborting pinch interaction generation=\(pinchTransitionGeneration) level=\(currentZoomLevel)")
     UIView.performWithoutAnimation {
       presentationMode = .resting
       anchoredTransition = nil
+      singleColumnZoomTransition = nil
+      frameTransition = nil
       layout.anchoredTransition = nil
+      layout.singleColumnZoomTransition = nil
+      layout.frameTransition = nil
       layout.currentZoomLevel = currentZoomLevel
       layout.gridColumnOffset = currentGridColumnOffset
       collectionView.isScrollEnabled = true
@@ -1202,6 +1623,12 @@ private final class TimelineZoomLayout: UICollectionViewLayout {
     didSet { invalidateLayout() }
   }
   var anchoredTransition: AnchoredGridTransition? {
+    didSet { invalidateLayout() }
+  }
+  var singleColumnZoomTransition: SingleColumnZoomTransition? {
+    didSet { invalidateLayout() }
+  }
+  var frameTransition: FrameTimelineTransition? {
     didSet { invalidateLayout() }
   }
 
@@ -1260,6 +1687,66 @@ private final class TimelineZoomLayout: UICollectionViewLayout {
         for: TimelineZoomLevel(columns: anchoredTransition.toColumns),
         width: width,
         gridColumnOffset: anchoredTransition.targetGridColumnOffset
+      )
+      cachedContentSize = CGSize(
+        width: max(fromSize.width, toSize.width),
+        height: max(
+          fromSize.height,
+          toSize.height,
+          collectionView.contentOffset.y + collectionView.bounds.height + collectionView.adjustedContentInset.bottom
+        )
+      )
+      return
+    }
+
+    if let singleColumnZoomTransition {
+      cachedAttributes = singleColumnZoomTransition.slots.enumerated().map { item, slot in
+        let indexPath = IndexPath(item: item, section: 0)
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
+        attributes.frame = singleColumnZoomFrame(for: slot, transition: singleColumnZoomTransition, width: width)
+        attributes.alpha = singleColumnZoomAlpha(for: slot)
+        attributes.zIndex = slot.zIndex
+        return attributes
+      }
+      let fromSize = contentSize(
+        for: singleColumnZoomTransition.fromLevel,
+        width: width,
+        gridColumnOffset: singleColumnZoomTransition.sourceGridColumnOffset
+      )
+      let toSize = contentSize(
+        for: singleColumnZoomTransition.toLevel,
+        width: width,
+        gridColumnOffset: singleColumnZoomTransition.targetGridColumnOffset
+      )
+      cachedContentSize = CGSize(
+        width: max(fromSize.width, toSize.width),
+        height: max(
+          fromSize.height,
+          toSize.height,
+          collectionView.contentOffset.y + collectionView.bounds.height + collectionView.adjustedContentInset.bottom
+        )
+      )
+      return
+    }
+
+    if let frameTransition {
+      cachedAttributes = frameTransition.slots.enumerated().map { item, slot in
+        let indexPath = IndexPath(item: item, section: 0)
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
+        attributes.frame = frameTransitionFrame(for: slot, transition: frameTransition)
+        attributes.alpha = frameTransitionAlpha(for: slot)
+        attributes.zIndex = slot.zIndex
+        return attributes
+      }
+      let fromSize = contentSize(
+        for: frameTransition.fromLevel,
+        width: width,
+        gridColumnOffset: frameTransition.sourceGridColumnOffset
+      )
+      let toSize = contentSize(
+        for: frameTransition.toLevel,
+        width: width,
+        gridColumnOffset: frameTransition.targetGridColumnOffset
       )
       cachedContentSize = CGSize(
         width: max(fromSize.width, toSize.width),
@@ -1500,6 +1987,63 @@ private final class TimelineZoomLayout: UICollectionViewLayout {
   }
 
   private func anchoredAlpha(for slot: AnchoredGridSlot, progress: CGFloat) -> CGFloat {
+    switch (slot.sourceAssetIndex, slot.targetAssetIndex) {
+    case (.some, .some), (.some, .none), (.none, .some):
+      1
+    case (.none, .none):
+      0
+    }
+  }
+
+  private func singleColumnZoomFrame(for slot: SingleColumnZoomSlot, transition: SingleColumnZoomTransition, width: CGFloat) -> CGRect {
+    let gridFrame = CGRect(
+      x: transition.gridCanvasOrigin.x + CGFloat(slot.canvasColumn) * transition.gridStep,
+      y: transition.gridCanvasOrigin.y + CGFloat(slot.relativeRow) * transition.gridStep,
+      width: transition.gridTileSize,
+      height: transition.gridTileSize
+    )
+
+    let singleColumnFrame: CGRect
+    if slot.canvasColumn == 0 {
+      singleColumnFrame = CGRect(
+        x: transition.singleColumnCanvasOrigin.x,
+        y: transition.singleColumnCanvasOrigin.y + CGFloat(slot.relativeRow) * transition.singleColumnStep,
+        width: transition.singleColumnTileSize,
+        height: transition.singleColumnTileSize
+      )
+    } else {
+      let offscreenX = slot.canvasColumn < 0 ? -transition.gridStep : width + spacing
+      singleColumnFrame = CGRect(
+        x: offscreenX,
+        y: gridFrame.minY,
+        width: transition.gridTileSize,
+        height: transition.gridTileSize
+      )
+    }
+
+    if transition.toLevel == .oneColumnAspect {
+      return gridFrame.interpolated(to: singleColumnFrame, progress: transition.geometryProgress)
+    }
+    return singleColumnFrame.interpolated(to: gridFrame, progress: transition.geometryProgress)
+  }
+
+  private func singleColumnZoomAlpha(for slot: SingleColumnZoomSlot) -> CGFloat {
+    switch (slot.sourceAssetIndex, slot.targetAssetIndex) {
+    case (.some, .some), (.some, .none), (.none, .some):
+      1
+    case (.none, .none):
+      0
+    }
+  }
+
+  private func frameTransitionFrame(for slot: FrameTimelineSlot, transition: FrameTimelineTransition) -> CGRect {
+    let sourceFrame = slot.sourceFrame ?? slot.targetFrame ?? .zero
+    let targetFrame = (slot.targetFrame ?? slot.sourceFrame ?? .zero)
+      .offsetBy(dx: transition.targetFrameOffset.x, dy: transition.targetFrameOffset.y)
+    return sourceFrame.interpolated(to: targetFrame, progress: transition.geometryProgress)
+  }
+
+  private func frameTransitionAlpha(for slot: FrameTimelineSlot) -> CGFloat {
     switch (slot.sourceAssetIndex, slot.targetAssetIndex) {
     case (.some, .some), (.some, .none), (.none, .some):
       1
