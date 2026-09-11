@@ -19,6 +19,10 @@ import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/codegen_loader.g.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/infrastructure/repositories/network.repository.dart';
+import 'package:immich_mobile/native_shell/native_route_observer.dart';
+import 'package:immich_mobile/native_shell/native_shell.dart';
+import 'package:immich_mobile/native_shell/native_shell_insets.dart';
+import 'package:immich_mobile/native_shell/native_timeline_bridge.dart';
 import 'package:immich_mobile/pages/common/splash_screen.page.dart';
 import 'package:immich_mobile/platform/background_worker_lock_api.g.dart';
 import 'package:immich_mobile/providers/app_life_cycle.provider.dart';
@@ -238,6 +242,8 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
 
     ref.read(viewIntentHandlerProvider).init();
     ref.read(shareIntentUploadProvider.notifier).init();
+    // Serves the native timeline from Immich's own timeline query.
+    ref.read(nativeTimelineBridgeProvider).init();
   }
 
   @override
@@ -258,6 +264,8 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
   Widget build(BuildContext context) {
     final router = ref.watch(appRouterProvider);
     final immichTheme = ref.watch(immichThemeProvider);
+    // So a native pop has a router to pop.
+    NativeShell.attachRouter(router);
 
     return ProviderScope(
       overrides: [localeProvider.overrideWithValue(context.locale)],
@@ -277,11 +285,21 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
             password: context.t.password,
             undo: context.t.undo,
           ),
-          child: ImmichThemeProvider(colorScheme: context.colorScheme, child: child!),
+          // The boundary is what lets Flutter photograph its own surface, so
+          // the native shell can hold a still over a container whose content
+          // has moved to another one. UIKit cannot photograph it.
+          child: RepaintBoundary(
+            key: NativeShell.captureKey,
+            child: NativeShellInsets(child: ImmichThemeProvider(colorScheme: context.colorScheme, child: child!)),
+          ),
         ),
         routerConfig: router.config(
           deepLinkBuilder: _deepLinkBuilder,
-          navigatorObservers: () => [AppNavigationObserver(ref: ref), TransitioningRouteObserver()],
+          navigatorObservers: () => [
+            AppNavigationObserver(ref: ref),
+            TransitioningRouteObserver(),
+            NativeRouteObserver(),
+          ],
         ),
       ),
     );

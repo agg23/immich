@@ -2,6 +2,7 @@ import 'package:auto_route/auto_route.dart';
 import 'package:flutter/widgets.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_shell.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.widget.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
@@ -26,7 +27,11 @@ class VideoPage extends StatelessWidget {
           return timelineService;
         }),
       ],
-      child: Timeline(appBar: MesmerizingSliverAppBar(title: context.t.videos)),
+      child: Timeline(
+        // The native shell shows this route's title in a real navigation
+        // bar, so the Flutter header would be the second one on screen.
+        appBar: NativeShell.suppressesAppBar('VideoRoute') ? null : MesmerizingSliverAppBar(title: context.t.videos),
+      ),
     );
   }
 }

@@ -14,6 +14,7 @@ import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/models/folder/recursive_folder.model.dart';
 import 'package:immich_mobile/models/shared_link/shared_link.model.dart';
 import 'package:immich_mobile/models/upload/share_intent_attachment.model.dart';
+import 'package:immich_mobile/native_shell/native_shell.dart';
 import 'package:immich_mobile/pages/backup/backup.page.dart';
 import 'package:immich_mobile/pages/backup/backup_album_selection.page.dart';
 import 'package:immich_mobile/pages/backup/backup_asset_detail.page.dart';
@@ -25,6 +26,7 @@ import 'package:immich_mobile/pages/common/headers_settings.page.dart';
 import 'package:immich_mobile/pages/common/settings.page.dart';
 import 'package:immich_mobile/pages/common/splash_screen.page.dart';
 import 'package:immich_mobile/pages/common/tab_shell.page.dart';
+import 'package:immich_mobile/pages/common/tab_stack.page.dart';
 import 'package:immich_mobile/pages/library/folder/folder.page.dart';
 import 'package:immich_mobile/pages/library/locked/pin_auth.page.dart';
 import 'package:immich_mobile/pages/library/partner/partner.page.dart';
@@ -111,23 +113,22 @@ class AppRouter extends RootStackRouter {
   }
 
   @override
-  RouteType get defaultRouteType => const RouteType.material();
+  RouteType get defaultRouteType => NativeShell.isActive
+      // Under the native shell the push is animated by
+      // `UINavigationController`. Leaving Flutter's transition on as well
+      // animates the same push twice, in two different curves, inside and
+      // outside the surface.
+      ? RouteType.custom(duration: Duration.zero, reverseDuration: Duration.zero)
+      : const RouteType.material();
 
-  @override
-  late final List<AutoRoute> routes = [
-    AutoRoute(page: SplashScreenRoute.page, initial: true),
-    AutoRoute(page: LoginRoute.page),
-    AutoRoute(page: ChangePasswordRoute.page),
-    AutoRoute(
-      page: TabShellRoute.page,
-      guards: [_authGuard, _duplicateGuard],
-      children: [
-        AutoRoute(page: MainTimelineRoute.page, guards: [_authGuard, _duplicateGuard]),
-        AutoRoute(page: SearchRoute.page, guards: [_authGuard, _duplicateGuard], maintainState: false),
-        AutoRoute(page: LibraryRoute.page, guards: [_authGuard, _duplicateGuard]),
-        AutoRoute(page: AlbumsRoute.page, guards: [_authGuard, _duplicateGuard]),
-      ],
-    ),
+  /// The routes a tab can push, declared once and repeated under every tab.
+  ///
+  /// Immich had these as siblings of `TabShellRoute`, so every push landed on
+  /// the root stack *above* the tab shell and covered the tab bar — which is why
+  /// the native shell had to hide it, and why you could not change tabs with a
+  /// route open. Under a tab each one pushes into that tab's own stack instead,
+  /// which is what a `UINavigationController` per tab already does natively.
+  List<AutoRoute> get _pushable => [
     AutoRoute(page: ProfilePictureCropRoute.page),
     AutoRoute(page: SettingsRoute.page, guards: [_duplicateGuard]),
     AutoRoute(page: SettingsSubRoute.page, guards: [_duplicateGuard]),
@@ -146,7 +147,6 @@ class AppRouter extends RootStackRouter {
     AutoRoute(page: BackupRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: BackupAlbumSelectionRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: LocalTimelineRoute.page, guards: [_authGuard, _duplicateGuard]),
-    AutoRoute(page: MainTimelineRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: RemoteAlbumRoute.page, guards: [_authGuard]),
     AutoRoute(
       page: AssetViewerRoute.page,
@@ -167,7 +167,6 @@ class AppRouter extends RootStackRouter {
     AutoRoute(page: ArchiveRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: LockedFolderRoute.page, guards: [_authGuard, _lockedGuard, _duplicateGuard]),
     AutoRoute(page: VideoRoute.page, guards: [_authGuard, _duplicateGuard]),
-    AutoRoute(page: LibraryRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: AssetSelectionTimelineRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: PartnerDetailRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: RecentlyTakenRoute.page, guards: [_authGuard, _duplicateGuard]),
@@ -193,8 +192,54 @@ class AppRouter extends RootStackRouter {
     AutoRoute(page: CleanupPreviewRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: SlideshowRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: MemoryListRoute.page, guards: [_authGuard, _duplicateGuard]),
+  ];
+
+  @override
+  late final List<AutoRoute> routes = [
+    AutoRoute(page: SplashScreenRoute.page, initial: true),
+    AutoRoute(page: LoginRoute.page),
+    AutoRoute(page: ChangePasswordRoute.page),
+    AutoRoute(
+      page: TabShellRoute.page,
+      guards: [_authGuard, _duplicateGuard],
+      children: [
+        AutoRoute(
+          page: PhotosTabRoute.page,
+          children: [
+            AutoRoute(page: MainTimelineRoute.page, initial: true, guards: [_authGuard, _duplicateGuard]),
+            ..._pushable,
+          ],
+        ),
+        AutoRoute(
+          page: SearchTabRoute.page,
+          children: [
+            AutoRoute(
+              page: SearchRoute.page,
+              initial: true,
+              guards: [_authGuard, _duplicateGuard],
+              maintainState: false,
+            ),
+            ..._pushable,
+          ],
+        ),
+        AutoRoute(
+          page: LibraryTabRoute.page,
+          children: [
+            AutoRoute(page: LibraryRoute.page, initial: true, guards: [_authGuard, _duplicateGuard]),
+            ..._pushable,
+          ],
+        ),
+        AutoRoute(
+          page: AlbumsTabRoute.page,
+          children: [
+            AutoRoute(page: AlbumsRoute.page, initial: true, guards: [_authGuard, _duplicateGuard]),
+            ..._pushable,
+          ],
+        ),
+      ],
+    ),
     // required to handle all deeplinks in deep_link.service.dart
     // auto_route_library#1722
-    RedirectRoute(path: '*', redirectTo: '/'),
+    RedirectRoute(path: "*", redirectTo: "/"),
   ];
 }

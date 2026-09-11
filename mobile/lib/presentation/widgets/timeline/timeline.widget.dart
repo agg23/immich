@@ -383,7 +383,13 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                           if (isSelectionMode)
                             const SelectionSliverAppBar()
                           else if (widget.appBar != null)
-                            widget.appBar!,
+                            widget.appBar!
+                          else
+                            // Nothing is drawing a header, so nothing is
+                            // reserving the space one occupies. The bottom
+                            // already gets `padding.bottom`; the top only ever
+                            // got it via the app bar.
+                            SliverPadding(padding: EdgeInsets.only(top: context.padding.top)),
                           if (widget.topSliverWidget != null) widget.topSliverWidget!,
                           SliverSegmentedList(
                             segments: segments,
