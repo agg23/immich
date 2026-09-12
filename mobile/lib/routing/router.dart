@@ -243,3 +243,28 @@ class AppRouter extends RootStackRouter {
     RedirectRoute(path: "*", redirectTo: "/"),
   ];
 }
+
+/// Addressing a tab's own root from anywhere in the app.
+///
+/// Every pushable route is declared under all four tabs, so auto_route resolves
+/// one against whichever tab is in front and no caller has to think about it. A
+/// tab's *root* is the exception: `MainTimelineRoute` is declared only in the
+/// photos branch and `AlbumsRoute` only in the albums branch. `_findStackScope`
+/// searches from the topmost router up to the root, so a sibling branch is
+/// never on that path and the match fails from any other tab — silently, since
+/// these are all fire-and-forget navigations.
+///
+/// Naming the whole path rather than the leaf makes the destination unambiguous
+/// from wherever it is called.
+const photosTab = TabShellRoute(children: [PhotosTabRoute(children: [MainTimelineRoute()])]);
+const searchTab = TabShellRoute(children: [SearchTabRoute(children: [SearchRoute()])]);
+const albumsTab = TabShellRoute(children: [AlbumsTabRoute(children: [AlbumsRoute()])]);
+
+/// The photos tab with a stack standing on its root.
+///
+/// For the entry points that arrive with a destination but no tab — a deep
+/// link, a view intent, a notification. They have to land in one of the four,
+/// and the timeline is the app's home. The root goes in underneath so there is
+/// something to go back to when the app was started cold by the link itself.
+TabShellRoute photosTabWith(List<PageRouteInfo> stack) =>
+    TabShellRoute(children: [PhotosTabRoute(children: [const MainTimelineRoute(), ...stack])]);

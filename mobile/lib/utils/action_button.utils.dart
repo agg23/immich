@@ -216,7 +216,7 @@ enum ActionButtonType {
         onPressed: buildContext == null
             ? null
             : () async {
-                await buildContext.router.navigate(const TabShellRoute(children: [MainTimelineRoute()]));
+                await buildContext.router.navigate(photosTab);
                 EventStream.shared.emit(ScrollToDateEvent(context.asset.createdAt));
               },
       ),

@@ -91,7 +91,7 @@ class BackupAssetDetailPage extends ConsumerWidget {
                         return;
                       }
 
-                      await context.navigateTo(const TabShellRoute(children: [MainTimelineRoute()]));
+                      await context.navigateTo(photosTab);
                       EventStream.shared.emit(ScrollToDateEvent(asset.createdAt));
                     },
                   );

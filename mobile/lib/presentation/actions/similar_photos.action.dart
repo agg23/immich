@@ -37,6 +37,6 @@ class SimilarPhotosAction extends ActionBuilder {
         ),
       );
 
-    unawaited(context.navigateTo(const SearchRoute()));
+    unawaited(context.navigateTo(searchTab));
   }
 }

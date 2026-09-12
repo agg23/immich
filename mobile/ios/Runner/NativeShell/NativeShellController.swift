@@ -70,6 +70,17 @@ final class NativeShellController: UITabBarController, UITabBarControllerDelegat
       NSLog("[shell] initial tab=%@", name)
     }
 
+    // `-immichShellRetap <seconds>` taps the selected tab again. It goes
+    // through the real delegate method rather than calling the bridge, so what
+    // is being checked is the path UIKit actually takes.
+    if let delay = UserDefaults.standard.string(forKey: "immichShellRetap"), let seconds = Double(delay) {
+      DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+        guard let self, let selected = self.selectedViewController else { return }
+        NSLog("[shell] debug: re-tapping the selected tab")
+        _ = self.tabBarController(self, shouldSelect: selected)
+      }
+    }
+
     // `-immichShellSwitchTo <tab>` switches tabs a few seconds in, so the tab
     // path can be checked without a pointer. A tab switch moves the one
     // surface exactly as a pop does, so it had the same defect.
@@ -113,6 +124,23 @@ final class NativeShellController: UITabBarController, UITabBarControllerDelegat
   /// The tab bar is the instruction, so the tab bar has to be what sends it.
   func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
     announceSelectedTab()
+  }
+
+  /// A tap on the tab you are already on returns that tab to its root.
+  ///
+  /// UIKit reads it as a selection that did not change and does nothing, but on
+  /// iOS it is the standard way back out of a stack. Note the history at the
+  /// bottom of this file: a `shouldSelect` that acted on the way *out* of a tab
+  /// froze the outgoing surface. This one never interferes with a selection —
+  /// it answers `true` unconditionally and only sends a message in the one case
+  /// where UIKit is about to do nothing at all.
+  func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
+    if let index = viewControllers?.firstIndex(of: viewController),
+       index == selectedIndex,
+       index < Tab.allCases.count {
+      ShellBridge.shared.popToRoot(tab: Tab.allCases[index].rawValue)
+    }
+    return true
   }
 
   /// Say which tab is active, whoever changed it.

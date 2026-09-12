@@ -58,6 +58,7 @@ final class ShellBridge {
         send(route: route, whenSettled: settle)
       }
       scheduleDebugNativePage()
+      scheduleDebugDartTab()
       if let name = UserDefaults.standard.string(forKey: "immichShellPushRoute") {
         // `-immichShellPushDelay <ms>` holds the push back, so it can be made
         // to happen after a tab switch rather than at launch.
@@ -85,7 +86,11 @@ final class ShellBridge {
       let routes = (args["routes"] as? [[String: Any]] ?? []).map {
         MirrorFrame(name: $0["name"] as? String ?? "?", title: $0["title"] as? String)
       }
-      reconcile(to: routes, tab: args["tab"] as? String ?? "")
+      let tab = args["tab"] as? String ?? ""
+      if args["claimTab"] as? Bool ?? false {
+        selectIfNeeded(tab: tab)
+      }
+      reconcile(to: routes, tab: tab)
       // After the stack, because reconciling may create the very container the
       // surface now belongs in.
       ShellEngine.shared.dartIsShowing(
@@ -112,6 +117,30 @@ final class ShellBridge {
 
   private var activeNavigationController: UINavigationController? {
     tabBarController?.selectedViewController as? UINavigationController
+  }
+
+  /// Follow a tab change Dart made on its own.
+  ///
+  /// The other direction has been wired since the tab bar started announcing
+  /// taps, but nothing carried a Dart-initiated switch the other way, so
+  /// "view in timeline" moved Dart to the photos tab and left the tab bar
+  /// sitting on Memories. The sync already names its tab for addressing; this
+  /// just also believes it.
+  ///
+  /// Only called for a sync that *claims* the tab. Every sync names one, but a
+  /// name is not a request: most syncs report the stack of whatever tab is
+  /// current, and acting on those reverses a tap that has not reached Dart yet
+  /// — the same unaddressed-instruction failure as reconciling into the
+  /// selected tab instead of the named one, in the other direction. Dart knows
+  /// which of its syncs are assertions because it knows which tab native last
+  /// announced, so it says so and this believes only that.
+  private func selectIfNeeded(tab: String) {
+    guard let shell = tabBarController,
+          let index = NativeShellController.Tab.allCases.firstIndex(where: { $0.rawValue == tab }),
+          index < (shell.viewControllers?.count ?? 0),
+          shell.selectedIndex != index else { return }
+    NSLog("[shell:nav] dart moved to %@", tab)
+    shell.selectedIndex = index
   }
 
   /// The navigation controller belonging to a named tab.
@@ -353,6 +382,25 @@ final class ShellBridge {
   }
 
   // MARK: - Geometry
+
+  /// `-immichShellDartTab <tab>` makes Dart change tab on its own after a
+  /// delay, which is the only way to see whether the native tab bar follows.
+  func scheduleDebugDartTab() {
+    guard let tab = UserDefaults.standard.string(forKey: "immichShellDartTab") else { return }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+      NSLog("[shell] debug: asking dart to switch to %@", tab)
+      self?.channel?.invokeMethod("debugTab", arguments: ["tab": tab])
+    }
+  }
+
+  /// Ask a tab to return to its root, because it was tapped while selected.
+  ///
+  /// Fire-and-forget: Dart pops and the sync that follows drives the native
+  /// removal, so the pop animation comes out of `reconcile` like every other
+  /// one rather than from a second call here racing it.
+  func popToRoot(tab: String) {
+    channel?.invokeMethod("popToRoot", arguments: ["tab": tab])
+  }
 
   private var reportedInsets: UIEdgeInsets?
 

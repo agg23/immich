@@ -205,11 +205,9 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
       return DeepLink.none;
     }
 
-    return DeepLink([
-      // we need something to segue back to if the app was cold started
-      if (isColdStart) const TabShellRoute(children: [MainTimelineRoute()]),
-      route,
-    ]);
+    // Only reached on a cold start; the warm path returned above. The tab and
+    // the route to segue back to both come from [photosTabWith].
+    return DeepLink([photosTabWith([route])]);
   }
 
   @override

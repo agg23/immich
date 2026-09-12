@@ -33,6 +33,18 @@ class NativeShell {
   /// Names the native side uses, in `AutoTabsRouter`'s order.
   static const _tabs = ['photos', 'search', 'albums', 'library'];
 
+  /// The tab the native side last said it had selected.
+  ///
+  /// A sync always names a tab, but naming one is not the same as asking for
+  /// it. Most syncs are Dart reporting a stack that happens to belong to the
+  /// current tab; only a few are Dart having changed the tab itself. Without
+  /// the difference, a sync sent while a tab tap is still travelling to Dart
+  /// arrives naming the *previous* tab and reverses the tap.
+  ///
+  /// Comparing against this separates the two: a tab that matches what native
+  /// last announced is a report, and anything else is Dart asserting a change.
+  static String _nativeTab = '';
+
   static TabsRouter? _tabsRouter;
   static bool _handlerInstalled = false;
   static RootStackRouter? _router;
@@ -198,6 +210,37 @@ class NativeShell {
     return tabs?.stackRouterOfIndex(tabs.activeIndex) ?? root;
   }
 
+  /// The stack belonging to a named tab, for instructions that name one.
+  ///
+  /// Addressed rather than active, for the reason every other message here is:
+  /// a tab tap changes the native selection before Dart hears about it, so
+  /// "the tab that is selected now" and "the tab this message is about" are not
+  /// reliably the same tab.
+  static StackRouter? _routerForTab(String tab) {
+    final tabs = _tabsRouter;
+    final index = _tabs.indexOf(tab);
+    if (tabs == null || index < 0) {
+      return null;
+    }
+    return tabs.stackRouterOfIndex(index);
+  }
+
+  /// Tapping the tab you are already on returns that tab to its root.
+  ///
+  /// Standard on iOS and UIKit does not do it for you — a re-tap of the
+  /// selected tab is just a selection that did not change. Dart owns the stack,
+  /// so it pops and the native side follows through the sync that results,
+  /// which is the same path a back button takes and needs no second animation.
+  static Future<void> _popToRoot(String tab) async {
+    final router = _routerForTab(tab);
+    if (router == null || router.stackData.length <= 1) {
+      return;
+    }
+    _log('popToRoot $tab depth=${router.stackData.length}');
+    router.popUntilRoot();
+    syncStack();
+  }
+
   static List<Map<String, String?>> _mirroredStack() {
     if (_router == null) {
       return const [];
@@ -263,13 +306,30 @@ class NativeShell {
     // tab. Reconciling into whichever tab happens to be selected is how a stack
     // described for the tab you left got pushed into the tab you entered.
     final tab = _activeTab();
-    final signature = '${stack.map((frame) => frame['name']).join(',')}|$showing|$overlay|$tab';
+    // Whether the native side should act on the tab or merely file it. See
+    // [_nativeTab]: a tap that has not reached Dart yet must not be undone by a
+    // sync that predates it.
+    final claimTab = tab.isNotEmpty && tab != _nativeTab;
+    final signature = '${stack.map((frame) => frame['name']).join(',')}|$showing|$overlay|$tab|$claimTab';
     if (!force && signature == _lastSync) {
       return;
     }
     _lastSync = signature;
     _log('sync [$signature] ${_where()}');
-    unawaited(_channel.invokeMethod('sync', {'routes': stack, 'surface': showing, 'overlay': overlay, 'tab': tab}));
+    if (claimTab) {
+      // Asserted once. Native applies it and the two sides agree from here, so
+      // a later native tap is the only thing that moves the tab again.
+      _nativeTab = tab;
+    }
+    unawaited(
+      _channel.invokeMethod('sync', {
+        'routes': stack,
+        'surface': showing,
+        'overlay': overlay,
+        'tab': tab,
+        'claimTab': claimTab,
+      }),
+    );
   }
 
   /// Reported by `NativeRouteObserver` for every routing change on any of
@@ -416,6 +476,24 @@ class NativeShell {
     if (call.method == 'capture') {
       return _capture();
     }
+    if (call.method == 'debugTab') {
+      // A tab change that starts in Dart, which is the direction the native
+      // side had no way to hear about. Not routed through [_routerForTab]: the
+      // point is to go through the app's own navigation, as 'view in timeline'
+      // does.
+      final tab = (call.arguments as Map)['tab']! as String;
+      final index = _tabs.indexOf(tab);
+      if (index >= 0) {
+        _log('debugTab $tab');
+        _tabsRouter?.setActiveIndex(index);
+        syncStack(force: true);
+      }
+      return null;
+    }
+    if (call.method == 'popToRoot') {
+      await _popToRoot((call.arguments as Map)['tab']! as String);
+      return null;
+    }
     if (call.method == 'popFromNative') {
       await _popFromNative((call.arguments as Map?)?['name'] as String?);
       return null;
@@ -440,6 +518,9 @@ class NativeShell {
       if (router == null) {
         _log('asked for $route before the tab shell existed');
       } else {
+        // Native chose this tab, so a sync naming it is a report rather than a
+        // request to change back.
+        _nativeTab = route!;
         router.setActiveIndex(index);
       }
     }

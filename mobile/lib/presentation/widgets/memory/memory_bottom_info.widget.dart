@@ -39,7 +39,7 @@ class MemoryBottomInfo extends StatelessWidget {
             child: MaterialButton(
               minWidth: 0,
               onPressed: () async {
-                await context.router.navigate(const TabShellRoute(children: [MainTimelineRoute()]));
+                await context.router.navigate(photosTab);
                 EventStream.shared.emit(ScrollToDateEvent(fileCreatedDate.toLocal()));
               },
               shape: const CircleBorder(),

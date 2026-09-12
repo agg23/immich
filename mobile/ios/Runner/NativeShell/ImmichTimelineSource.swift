@@ -13,6 +13,7 @@ struct TimelineAsset {
   let isFavorite: Bool
   let thumbURL: URL?
   let previewURL: URL?
+  let originalURL: URL?
 
   init?(_ raw: [String: Any]) {
     guard let name = raw["name"] as? String else { return nil }
@@ -25,6 +26,7 @@ struct TimelineAsset {
     isFavorite = raw["isFavorite"] as? Bool ?? false
     thumbURL = (raw["thumbUrl"] as? String).flatMap(URL.init(string:))
     previewURL = (raw["previewUrl"] as? String).flatMap(URL.init(string:))
+    originalURL = (raw["originalUrl"] as? String).flatMap(URL.init(string:))
   }
 }
 

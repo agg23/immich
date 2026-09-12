@@ -183,6 +183,9 @@ class NativeTimelineBridge {
       // about the server endpoint, the size enum or the edited flag.
       if (remoteId != null) 'thumbUrl': getThumbnailUrlForRemoteId(remoteId),
       if (remoteId != null) 'previewUrl': getThumbnailUrlForRemoteId(remoteId, type: AssetMediaSize.preview),
+      // The untouched upload. The server re-encodes thumbnails and previews, so
+      // this is the only URL that can still carry a gain map.
+      if (remoteId != null) 'originalUrl': getOriginalUrlForRemoteId(remoteId),
     };
   }
 }
