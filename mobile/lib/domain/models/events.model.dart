@@ -9,17 +9,6 @@ class ScrollToTopEvent extends Event {
   const ScrollToTopEvent();
 }
 
-/// Debug only: scroll the visible timeline to an offset.
-///
-/// The simulator takes no touch input from a script, so a scroll-driven
-/// behaviour — a header collapsing, a bar taking over its title — cannot
-/// otherwise be exercised at all.
-class ScrollToOffsetEvent extends Event {
-  const ScrollToOffsetEvent(this.offset);
-
-  final double offset;
-}
-
 class ScrollToDateEvent extends Event {
   final DateTime date;
 

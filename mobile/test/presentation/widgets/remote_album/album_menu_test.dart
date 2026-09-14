@@ -5,12 +5,7 @@ import 'package:immich_mobile/presentation/widgets/remote_album/album_menu.dart'
 
 import '../../../widget_tester_extensions.dart';
 
-/// What `album_option_widget_test.dart` was about, against the rows instead of
-/// the widget that used to hold them: which of them an album offers, and when.
-/// That the menu then renders and fires is [NativeBarMenu]'s to answer, and is
-/// tested there.
 void main() {
-  /// The rows need a localized context, and nothing else.
   Future<List<NativeBarMenuItem>> rows(
     WidgetTester tester,
     List<NativeBarMenuItem> Function(BuildContext context) build,

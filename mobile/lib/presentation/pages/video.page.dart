@@ -26,11 +26,7 @@ class VideoPage extends StatelessWidget {
           return timelineService;
         }),
       ],
-      child: Timeline(
-        // The native shell shows this route's title in a real navigation
-        // bar, so the Flutter header would be the second one on screen.
-        appBar: MesmerizingSliverAppBar(title: context.t.videos),
-      ),
+      child: Timeline(appBar: MesmerizingSliverAppBar(title: context.t.videos)),
     );
   }
 }

@@ -32,14 +32,10 @@ class TrashPage extends StatelessWidget {
           return timelineService;
         }),
       ],
-      // The menu has to be *built* here rather than wrapped in a widget of its
-      // own, which is what it used to be. A bar reads its actions as data, so a
-      // `_TrashKebabMenu()` in `actions:` is opaque to it — and the ref the menu
-      // needs is this scope's, not the one outside it, so the `Consumer` has to
-      // be inside the `ProviderScope` rather than around it.
+      // Inside the `ProviderScope` and around the bar: the menu itself cannot be wrapped.
       child: Consumer(
         builder: (context, ref, child) => Timeline(
-          appBar: NativeSliverAppBar.plain(
+          appBar: NativeSliverAppBar(
             title: context.t.trash,
             floating: true,
             snap: true,

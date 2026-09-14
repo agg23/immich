@@ -205,9 +205,9 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
       return DeepLink.none;
     }
 
-    // Only reached on a cold start; the warm path returned above. The tab and
-    // the route to segue back to both come from [photosTabWith].
-    return DeepLink([photosTabWith([route])]);
+    return DeepLink([
+      photosTabWith([route]),
+    ]);
   }
 
   @override
@@ -240,7 +240,6 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
 
     ref.read(viewIntentHandlerProvider).init();
     ref.read(shareIntentUploadProvider.notifier).init();
-    // Serves the native timeline from Immich's own timeline query.
     ref.read(nativeTimelineBridgeProvider).init();
   }
 
@@ -262,7 +261,6 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
   Widget build(BuildContext context) {
     final router = ref.watch(appRouterProvider);
     final immichTheme = ref.watch(immichThemeProvider);
-    // So a native pop has a router to pop.
     NativeShell.attachRouter(router);
 
     return ProviderScope(
@@ -283,12 +281,12 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
             password: context.t.password,
             undo: context.t.undo,
           ),
-          // The boundary is what lets Flutter photograph its own surface, so
-          // the native shell can hold a still over a container whose content
-          // has moved to another one. UIKit cannot photograph it.
+          // Lets Flutter photograph its own surface; UIKit cannot.
           child: RepaintBoundary(
             key: NativeShell.captureKey,
-            child: NativeShellInsets(child: ImmichThemeProvider(colorScheme: context.colorScheme, child: child!)),
+            child: NativeShellInsets(
+              child: ImmichThemeProvider(colorScheme: context.colorScheme, child: child!),
+            ),
           ),
         ),
         routerConfig: router.config(

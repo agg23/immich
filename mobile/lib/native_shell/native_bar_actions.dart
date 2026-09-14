@@ -3,16 +3,7 @@ import 'package:immich_mobile/native_shell/native_bar_menu.dart';
 import 'package:immich_mobile/native_shell/native_shell.dart';
 import 'package:immich_mobile/native_shell/native_symbols.dart';
 
-/// One app bar action as the native bar would receive it, or null.
-///
-/// A `NativeBarMenu` describes itself. Everything else is read off the widget:
-/// an `IconButton` whose icon has a symbol, or a `TextButton` with a `Text`
-/// child. Anything else does not translate, and by the all-or-nothing rule that
-/// keeps its whole bar in Flutter.
 NativeBarAction? translateAction(Widget widget) {
-  // Declared rather than inferred: a menu's rows only exist once the page's own
-  // action widget has been built, which is not something a bar reading
-  // `actions` can do. See [NativeBarMenu].
   if (widget is NativeBarMenu) {
     return widget.describe();
   }
@@ -32,13 +23,7 @@ NativeBarAction? translateAction(Widget widget) {
   return null;
 }
 
-/// Every action translated, or null if any one of them did not.
-///
-/// Shared by both bar shapes because the rule is the same in both and a second
-/// copy would be a second thing to keep in step: a native bar that rendered the
-/// two actions it understood and silently dropped the third is a worse failure
-/// than no native bar at all, and an invisible one — the page still looks
-/// finished.
+/// All or nothing: a bar silently missing one action fails invisibly.
 List<NativeBarAction>? translateActions(List<Widget>? actions) {
   final translated = <NativeBarAction>[];
   for (final action in actions ?? const <Widget>[]) {
@@ -51,7 +36,6 @@ List<NativeBarAction>? translateActions(List<Widget>? actions) {
   return translated;
 }
 
-/// Which action stopped a bar translating, and why, for the log.
 String? untranslatableAction(List<Widget>? actions) {
   for (final action in actions ?? const <Widget>[]) {
     if (translateAction(action) != null) {

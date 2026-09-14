@@ -15,17 +15,11 @@ import native_video_player
     URLSessionManager.patchBackgroundDownloader()
     BackgroundWorkerApiImpl.registerBackgroundWorkers()
 
-    // Start Dart now rather than when the first container asks for a surface,
-    // so Immich's bootstrap — drift, migrations, the isolate pool — overlaps
-    // with the shell putting its window together.
     _ = ShellEngine.shared
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
-  /// Dead under the native shell: there is no implicit engine to initialize
-  /// once the storyboard is out of the launch path. Kept so switching back is
-  /// a two-line Info.plist change.
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     let messenger = engineBridge.applicationRegistrar.messenger()

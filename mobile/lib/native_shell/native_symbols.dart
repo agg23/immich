@@ -1,14 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Material icons to SF Symbols, for the icons Immich actually puts in an app
-/// bar or an app bar's menu.
-///
-/// An icon that is not here makes its page fall back rather than guessing a
-/// symbol, so the table can stay honest and short. It lives on its own because
-/// both halves of a bar need it: the buttons, which are widgets [NativeAppBar]
-/// reads, and the menu rows, which are data a [NativeBarMenu] declares.
 final _symbols = <IconData, String>{
-  // Bar buttons.
   Icons.search: 'magnifyingglass',
   Icons.close: 'xmark',
   Icons.add_rounded: 'plus',
@@ -24,7 +16,6 @@ final _symbols = <IconData, String>{
   Icons.more_vert: 'ellipsis',
   Icons.slideshow_outlined: 'play.rectangle',
   Icons.chat_outlined: 'bubble.left',
-  // Menu rows.
   Icons.delete_forever_outlined: 'trash.slash',
   Icons.restore_outlined: 'arrow.uturn.backward',
   Icons.edit: 'pencil',
@@ -37,5 +28,4 @@ final _symbols = <IconData, String>{
   Icons.delete: 'trash',
 };
 
-/// The SF Symbol for [icon], or null if there is no honest answer.
 String? nativeSymbolFor(IconData? icon) => icon == null ? null : _symbols[icon];

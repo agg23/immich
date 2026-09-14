@@ -4,10 +4,7 @@ import 'package:immich_mobile/native_shell/native_bar_menu.dart';
 
 import '../widget_tester_extensions.dart';
 
-/// Replaces the per-page menu tests (`album_option_widget_test.dart`) that went
-/// with the widgets they covered. The rows a page offers are now the page's
-/// business; what is left to test is that a declared menu still renders and
-/// still fires, and that it refuses to translate rather than translating badly.
+/// That a declared menu renders, fires, and refuses to translate rather than badly.
 void main() {
   const trigger = Icons.more_vert_rounded;
 
@@ -45,9 +42,7 @@ void main() {
     test('describes itself for the native bar', () {
       const menu = NativeBarMenu(
         icon: trigger,
-        items: [
-          NativeBarMenuItem(label: 'Delete album', icon: Icons.delete, destructive: true),
-        ],
+        items: [NativeBarMenuItem(label: 'Delete album', icon: Icons.delete, destructive: true)],
       );
 
       expect(menu.untranslatable(), isNull);

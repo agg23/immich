@@ -12,9 +12,8 @@ import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/datetime_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
-import 'package:immich_mobile/native_shell/native_bar_actions.dart';
 import 'package:immich_mobile/native_shell/native_bar_menu.dart';
-import 'package:immich_mobile/native_shell/native_shell.dart';
+import 'package:immich_mobile/native_shell/native_hero_bar.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
 import 'package:immich_mobile/providers/infrastructure/current_album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/remote_album.provider.dart';
@@ -33,19 +32,16 @@ class RemoteAlbumSliverAppBar extends ConsumerStatefulWidget {
   });
 
   final IconData icon;
-  /// The overflow menu, as rows rather than as a widget: the page owns what
-  /// they do, this bar owns what they look like, and a `NativeBarMenu` is only
-  /// readable by the native bar if it sits in `actions:` unwrapped.
+
   final List<NativeBarMenuItem> kebabItems;
   final void Function()? onEditTitle;
   final void Function()? onActivity;
 
   @override
-  ConsumerState<RemoteAlbumSliverAppBar> createState() => _MesmerizingSliverAppBarState();
+  ConsumerState<RemoteAlbumSliverAppBar> createState() => _RemoteAlbumSliverAppBarState();
 }
 
-class _MesmerizingSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBar> {
-  static const _route = 'RemoteAlbumRoute';
+class _RemoteAlbumSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBar> with NativeHeroBar {
   double _scrollProgress = 0.0;
 
   double _calculateScrollProgress(FlexibleSpaceBarSettings? settings) {
@@ -97,17 +93,7 @@ class _MesmerizingSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBa
       ),
     ];
 
-    // Unlike every other page the shell takes over, this header is not chrome
-    // and does not go away: the cover photo *is* the page. Only the row of
-    // controls across the top of it moves to the native bar, which then floats
-    // over the photo rather than sitting above it.
-    final native = translateActions(actions);
-    final hero = NativeShell.isActive && native != null;
-    if (hero) {
-      NativeShell.publishBar(_route, title: currentAlbum.name, actions: native, hero: true);
-    } else if (NativeShell.isActive) {
-      NativeShell.logFallback(_route, untranslatableAction(actions) ?? 'no reason');
-    }
+    publishHeroBar(title: currentAlbum.name, actions: actions);
 
     return SliverAppBar(
       expandedHeight: 400.0,
@@ -115,9 +101,8 @@ class _MesmerizingSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBa
       pinned: true,
       snap: false,
       elevation: 0,
-      // The native bar brings its own chevron, and its own buttons.
-      automaticallyImplyLeading: !hero,
-      leading: isMultiSelectEnabled || hero
+      automaticallyImplyLeading: !isHero,
+      leading: isMultiSelectEnabled || isHero
           ? const SizedBox.shrink()
           : IconButton(
               icon: Icon(
@@ -127,25 +112,25 @@ class _MesmerizingSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBa
               ),
               onPressed: () => context.maybePop(),
             ),
-      actions: hero ? const [] : actions,
-      title: hero
+      actions: isHero ? const [] : actions,
+      title: isHero
           ? null
           : Builder(
-        builder: (context) {
-          final settings = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
-          final scrollProgress = _calculateScrollProgress(settings);
+              builder: (context) {
+                final settings = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
+                final scrollProgress = _calculateScrollProgress(settings);
 
-          return AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
-            child: scrollProgress > 0.95
-                ? Text(
-                    currentAlbum.name,
-                    style: TextStyle(color: context.primaryColor, fontWeight: FontWeight.w600, fontSize: 18),
-                  )
-                : null,
-          );
-        },
-      ),
+                return AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: scrollProgress > 0.95
+                      ? Text(
+                          currentAlbum.name,
+                          style: TextStyle(color: context.primaryColor, fontWeight: FontWeight.w600, fontSize: 18),
+                        )
+                      : null,
+                );
+              },
+            ),
       flexibleSpace: Builder(
         builder: (context) {
           final settings = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
@@ -156,11 +141,7 @@ class _MesmerizingSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBa
             if (!mounted) {
               return;
             }
-            // Same threshold the Flutter title used, so the native bar takes
-            // over at the point the page always handed the title across.
-            if (hero) {
-              NativeShell.setBarCollapsed(_route, collapsed: scrollProgress > 0.95);
-            }
+            reportHeroCollapse(scrollProgress);
             if (_scrollProgress != scrollProgress) {
               setState(() {
                 _scrollProgress = scrollProgress;

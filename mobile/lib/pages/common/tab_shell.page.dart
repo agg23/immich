@@ -85,25 +85,12 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
 
     return AutoTabsRouter(
       routes: const [PhotosTabRoute(), SearchTabRoute(), AlbumsTabRoute(), LibraryTabRoute()],
-      // The native tab bar switches instantly, so a 600ms cross-fade inside the
-      // surface is a second animation racing the first — and with a route pushed
-      // it races the native bar and the surface handoff as well. Same argument as
-      // `defaultRouteType`: under the shell, Flutter does not animate what UIKit
-      // has already animated.
       duration: NativeShell.isActive ? Duration.zero : const Duration(milliseconds: 600),
       transitionBuilder: (context, child, animation) => FadeTransition(opacity: animation, child: child),
       builder: (context, child) {
         final tabsRouter = AutoTabsRouter.of(context);
-        // The native tab bar drives this router instead of the bar below.
         NativeShell.attach(tabsRouter);
         return PopScope(
-          // Back-to-the-photos-tab is Android back-button behaviour, and under
-          // the native shell there is no Android back button — but there is a
-          // native stack whose pops reach this router. Left enabled, a pop that
-          // arrives without a matching route becomes a silent
-          // `setActiveIndex(0)`: the app moves to the photos tab while the
-          // native tab bar still says Search, with nothing on screen to explain
-          // it. The shell owns tab selection, so it has to own this too.
           canPop: NativeShell.isActive || tabsRouter.activeIndex == 0,
           onPopInvokedWithResult: (didPop, _) => !didPop ? tabsRouter.setActiveIndex(0) : null,
           child: Scaffold(
@@ -117,8 +104,6 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
                     ],
                   )
                 : child,
-            // Under the native shell there is a real UITabBar below this
-            // surface; drawing a second one would be comic.
             bottomNavigationBar: NativeShell.isActive
                 ? null
                 : _BottomNavigationBar(tabsRouter: tabsRouter, destinations: navigationDestinations),

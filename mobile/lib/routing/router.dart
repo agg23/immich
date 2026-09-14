@@ -120,20 +120,10 @@ class AppRouter extends RootStackRouter {
 
   @override
   RouteType get defaultRouteType => NativeShell.isActive
-      // Under the native shell the push is animated by
-      // `UINavigationController`. Leaving Flutter's transition on as well
-      // animates the same push twice, in two different curves, inside and
-      // outside the surface.
+      // `UINavigationController` animates the push; Flutter would animate it again.
       ? RouteType.custom(duration: Duration.zero, reverseDuration: Duration.zero)
       : const RouteType.material();
 
-  /// The routes a tab can push, declared once and repeated under every tab.
-  ///
-  /// Immich had these as siblings of `TabShellRoute`, so every push landed on
-  /// the root stack *above* the tab shell and covered the tab bar — which is why
-  /// the native shell had to hide it, and why you could not change tabs with a
-  /// route open. Under a tab each one pushes into that tab's own stack instead,
-  /// which is what a `UINavigationController` per tab already does natively.
   List<AutoRoute> get _pushable => [
     AutoRoute(page: ProfilePictureCropRoute.page),
     AutoRoute(page: SettingsRoute.page, guards: [_duplicateGuard]),
@@ -156,9 +146,6 @@ class AppRouter extends RootStackRouter {
     AutoRoute(page: RemoteAlbumRoute.page, guards: [_authGuard]),
     AutoRoute(
       page: AssetViewerRoute.page,
-      // [_nativeViewerGuard] last: it declines the route outright under the
-      // shell, and the two before it are what decide whether opening a viewer
-      // is allowed at all.
       guards: [_authGuard, _duplicateGuard, _nativeViewerGuard],
       type: RouteType.custom(
         customRouteBuilder: <T>(context, child, page) => PageRouteBuilder<T>(
@@ -253,27 +240,24 @@ class AppRouter extends RootStackRouter {
   ];
 }
 
-/// Addressing a tab's own root from anywhere in the app.
-///
-/// Every pushable route is declared under all four tabs, so auto_route resolves
-/// one against whichever tab is in front and no caller has to think about it. A
-/// tab's *root* is the exception: `MainTimelineRoute` is declared only in the
-/// photos branch and `AlbumsRoute` only in the albums branch. `_findStackScope`
-/// searches from the topmost router up to the root, so a sibling branch is
-/// never on that path and the match fails from any other tab — silently, since
-/// these are all fire-and-forget navigations.
-///
-/// Naming the whole path rather than the leaf makes the destination unambiguous
-/// from wherever it is called.
-const photosTab = TabShellRoute(children: [PhotosTabRoute(children: [MainTimelineRoute()])]);
-const searchTab = TabShellRoute(children: [SearchTabRoute(children: [SearchRoute()])]);
-const albumsTab = TabShellRoute(children: [AlbumsTabRoute(children: [AlbumsRoute()])]);
+const photosTab = TabShellRoute(
+  children: [
+    PhotosTabRoute(children: [MainTimelineRoute()]),
+  ],
+);
+const searchTab = TabShellRoute(
+  children: [
+    SearchTabRoute(children: [SearchRoute()]),
+  ],
+);
+const albumsTab = TabShellRoute(
+  children: [
+    AlbumsTabRoute(children: [AlbumsRoute()]),
+  ],
+);
 
-/// The photos tab with a stack standing on its root.
-///
-/// For the entry points that arrive with a destination but no tab — a deep
-/// link, a view intent, a notification. They have to land in one of the four,
-/// and the timeline is the app's home. The root goes in underneath so there is
-/// something to go back to when the app was started cold by the link itself.
-TabShellRoute photosTabWith(List<PageRouteInfo> stack) =>
-    TabShellRoute(children: [PhotosTabRoute(children: [const MainTimelineRoute(), ...stack])]);
+TabShellRoute photosTabWith(List<PageRouteInfo> stack) => TabShellRoute(
+  children: [
+    PhotosTabRoute(children: [const MainTimelineRoute(), ...stack]),
+  ],
+);

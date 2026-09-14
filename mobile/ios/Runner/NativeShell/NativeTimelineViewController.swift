@@ -1,28 +1,12 @@
 import Flutter
 import UIKit
 
-/// The native timeline: the tab this whole exercise is about.
-///
-/// Grid geometry is copied from Immich's own constants so the two are
-/// comparable — three columns, 2pt gutters, 320pt thumbnails. The day header
-/// is not: Immich's is 80pt of Flutter layout, and matching that number would
-/// only reproduce a Material header in UIKit. The question this demo is asked
-/// to answer is what the native version should feel like, so the header is
-/// sized and weighted like the one in Photos.
-///
-/// The data is Immich's, over a channel: see `ImmichTimelineSource`. The
-/// chrome is the point — a `UICollectionView` is a real `UIScrollView`, so the
-/// large title collapses, the navigation bar picks up its scroll edge
-/// appearance and the iOS 26 tab bar minimizes, none of it forwarded and none
-/// of it a frame behind.
 final class NativeTimelineViewController: UIViewController {
   private let source: ImmichTimelineSource
   private var collectionView: UICollectionView!
 
   private enum Metrics {
-    /// kTimelineColumnCount
     static let columns = 3
-    /// kTimelineSpacing
     static let spacing: CGFloat = 2
     static let headerHeight: CGFloat = 44
   }
@@ -65,8 +49,6 @@ final class NativeTimelineViewController: UIViewController {
       collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
 
-    // Explicit registration as well as the implicit one, so the bottom bar
-    // reacts too rather than only the navigation bar.
     setContentScrollView(collectionView, for: [.top, .bottom])
 
     source.addObserver(
@@ -83,15 +65,6 @@ final class NativeTimelineViewController: UIViewController {
     source.open()
   }
 
-  /// `-immichShellOpenAsset <flat index>` opens the viewer as soon as there
-  /// is data for it.
-  ///
-  /// There is no pointer automation for the simulator and no UI test target in
-  /// this repo, so without something like this a screen reachable only by a
-  /// tap cannot be looked at from a script at all.
-  /// `-immichShellHdrProbe <count>` runs [ThumbnailLoader.probeHDR] over the
-  /// first N assets, so the question is answered against this library's real
-  /// photos rather than against one asset that might not be HDR at all.
   private var probedHDR = false
 
   private func runHDRProbeIfRequested() {
@@ -104,10 +77,6 @@ final class NativeTimelineViewController: UIViewController {
     guard #available(iOS 17.0, *) else { return }
     let scanned = (0 ..< count).compactMap { source.asset(at: $0) }
 
-    // What is actually in this library. The first run probed six assets that
-    // turned out to be Immich's own generated derivatives stored as assets -
-    // one "original" was a 21KB webp thumbnail - so every row read SDR for a
-    // reason that had nothing to do with the decode.
     var extensions: [String: Int] = [:]
     for asset in scanned {
       let ext = (asset.name as NSString).pathExtension.lowercased()
@@ -116,9 +85,6 @@ final class NativeTimelineViewController: UIViewController {
     shellLog("[shell:probe] scanned %d: %@", scanned.count, extensions.sorted { $0.value > $1.value }
       .map { "\($0.key)=\($0.value)" }.joined(separator: " "))
 
-    // A camera original is the only thing that can carry a gain map, and on an
-    // iPhone that means HEIC. Fall back to anything not obviously a derivative
-    // so the probe still says something on a library with no HEIC in it.
     let cameraish = scanned.filter { ($0.name as NSString).pathExtension.lowercased() == "heic" }
     let candidates = cameraish.isEmpty
       ? scanned.filter { !$0.name.contains("_preview") && !$0.name.contains("_thumbnail") }
@@ -133,9 +99,6 @@ final class NativeTimelineViewController: UIViewController {
     guard !openedRequestedAsset,
           let requested = UserDefaults.standard.string(forKey: "immichShellOpenAsset")
     else { return }
-    // `heic` rather than a number: the HDR path can only be judged on a camera
-    // original, and which index holds one differs per library. The first probe
-    // opened asset 0, which was a generated webp derivative.
     let index: Int
     if requested == "heic" {
       guard let found = (0 ..< 400).first(where: {
@@ -149,11 +112,6 @@ final class NativeTimelineViewController: UIViewController {
     }
     guard source.asset(at: index) != nil else { return }
     openedRequestedAsset = true
-    // `-immichShellOpenDelay <seconds>` waits before opening. Without it the
-    // open fires from the first page-loaded callback, when the grid has a
-    // computed layout but has dequeued no cells - so the zoom degrades to its
-    // cross-fade for a reason that has nothing to do with a real tap. Two runs
-    // were read as a transition bug before that was understood.
     let delay = Double(UserDefaults.standard.string(forKey: "immichShellOpenDelay") ?? "") ?? 0
     shellLog("[shell:timeline] opening requested asset %d after %.1fs", index, delay)
     guard delay > 0 else {
@@ -162,10 +120,6 @@ final class NativeTimelineViewController: UIViewController {
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
       guard let self else { return }
-      // A tap can only ever start from a tile that is on screen. Opening an
-      // off-screen index from a script is not the same event, and reads as a
-      // broken transition: index 20 with 15 cells visible has no cell, so the
-      // flight correctly degrades to a cross-fade and proves nothing.
       self.scrollZoomItemIntoView(index)
       self.view.layoutIfNeeded()
       shellLog("[shell:timeline] grid has %ld cells", self.collectionView.visibleCells.count)
@@ -175,17 +129,10 @@ final class NativeTimelineViewController: UIViewController {
 
   private func open(assetAt flatIndex: Int) {
     let viewer = AssetViewerController(source: source, startIndex: flatIndex)
-    // Claimed for the duration of the viewer. The same navigation controller
-    // carries mirrored Flutter frames, so the delegate answers nil for every
-    // transition that is not this viewer and UIKit keeps its own animation for
-    // those — see [navigationController(_:animationControllerFor:...)].
     navigationController?.delegate = self
     navigationController?.pushViewController(viewer, animated: true)
   }
 
-  /// A page landing does not change the layout, only the contents of tiles
-  /// that were drawn empty. Reloading just those avoids a full reload during
-  /// a scroll, which would fight the scroll.
   private func reloadVisible(in page: Int) {
     let range = source.range(ofPage: page)
     let paths = collectionView.indexPathsForVisibleItems.filter { range.contains(source.flatIndex(for: $0)) }
@@ -203,7 +150,7 @@ final class NativeTimelineViewController: UIViewController {
         widthDimension: .fractionalWidth(1),
         heightDimension: .fractionalWidth(fraction)
       ),
-      // `repeatingSubitem:` is iOS 16; the Runner target is 15.
+    // `repeatingSubitem:` is iOS 16; the Runner target is 15.
       subitem: item,
       count: Metrics.columns
     )
@@ -219,7 +166,6 @@ final class NativeTimelineViewController: UIViewController {
       elementKind: UICollectionView.elementKindSectionHeader,
       alignment: .top
     )
-    // Sticky day headers, which Immich's sliver list also does.
     header.pinToVisibleBounds = true
     section.boundarySupplementaryItems = [header]
     return UICollectionViewCompositionalLayout(section: section)
@@ -296,8 +242,6 @@ private final class TimelineTileCell: UICollectionViewCell {
   static let reuseID = "tile"
   private let imageView = UIImageView()
 
-  /// What the zoom transition flies, and whether this tile is currently
-  /// standing in for a photo that is on its way to or from the viewer.
   var tileImage: UIImage? { imageView.image }
   var tileHidden: Bool {
     get { imageView.isHidden }
@@ -336,8 +280,6 @@ private final class TimelineTileCell: UICollectionViewCell {
     contentView.backgroundColor = .secondarySystemBackground
 
     guard let asset else {
-      // The page this tile belongs to has not arrived yet. It will, and only
-      // this tile is reloaded when it does.
       imageView.image = nil
       duration.text = nil
       return
@@ -409,9 +351,6 @@ extension NativeTimelineViewController: ZoomTransitionSource {
       shellLog("[shell:zoom] no layout attributes for %d (%ld/%ld)", index, path.section, path.item)
       return nil
     }
-    // Layout attributes rather than the cell: a tile scrolled out of the window
-    // has no cell but still has a frame, which is exactly the case a dismissal
-    // onto an off-screen tile needs answered.
     return collectionView.convert(attributes.frame, to: view)
   }
 
@@ -424,17 +363,11 @@ extension NativeTimelineViewController: ZoomTransitionSource {
     if let image = cell?.tileImage {
       return image
     }
-    // Kept apart deliberately. Folding these into one `if let` and reporting
-    // "no cell" sent two builds after a missing cell that was never missing:
-    // the cell was there and its thumbnail had simply not downloaded yet,
-    // because the tile had been scrolled into view a moment earlier.
     if cell != nil {
       shellLog("[shell:zoom] cell %ld/%ld exists but has no picture yet", path.section, path.item)
     }
-    // No cell, so fall back to whatever the loader has cached at tile size.
     guard let asset = source.asset(at: index) else { return nil }
-    // Keyed exactly as `cellForItemAt` keys it, or the lookup is a guaranteed
-    // miss: `view` and `collectionView` do not have to be the same width.
+    // Keyed as `cellForItemAt` keys it, or the lookup is a guaranteed miss.
     let tileSize = collectionView.bounds.width / CGFloat(Metrics.columns)
     let hit = ThumbnailLoader.shared.cached(asset, size: tileSize)
     shellLog(
@@ -468,8 +401,6 @@ extension NativeTimelineViewController: UINavigationControllerDelegate {
     from fromVC: UIViewController,
     to toVC: UIViewController
   ) -> UIViewControllerAnimatedTransitioning? {
-    // Only the two transitions that have a tile at one end of them. Everything
-    // else on this stack is a mirrored Flutter frame and keeps the system push.
     if operation == .push, toVC is AssetViewerController, fromVC === self {
       return ZoomTransitionAnimator(presenting: true, source: self)
     }
@@ -483,8 +414,6 @@ extension NativeTimelineViewController: UINavigationControllerDelegate {
     _ navigationController: UINavigationController,
     interactionControllerFor animationController: UIViewControllerAnimatedTransitioning
   ) -> UIViewControllerInteractiveTransitioning? {
-    // Consulted only when the method above returned an animator, which is why
-    // the drag has to be driven from the viewer rather than from here.
     (navigationController.topViewController as? AssetViewerController)?.activeInteraction
   }
 
@@ -493,8 +422,6 @@ extension NativeTimelineViewController: UINavigationControllerDelegate {
     didShow viewController: UIViewController,
     animated: Bool
   ) {
-    // Hand the stack back once the viewer is gone, so nothing else on this tab
-    // is transitioning through a delegate that belongs to the grid.
     if viewController === self {
       navigationController.delegate = nil
     }

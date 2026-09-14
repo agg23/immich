@@ -183,7 +183,6 @@ class _RemoteAlbumPageState extends ConsumerState<RemoteAlbumPage> {
     unawaited(context.pushRoute(ActivitiesRoute(album: _album)));
   }
 
-
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(currentUserProvider);

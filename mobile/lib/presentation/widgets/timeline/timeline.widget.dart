@@ -194,14 +194,6 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     switch (event) {
       case ScrollToTopEvent():
         _scrollToTop();
-      case ScrollToOffsetEvent(:final offset):
-        if (_scrollController.hasClients) {
-          _scrollController.animateTo(
-            offset.clamp(0.0, _scrollController.position.maxScrollExtent),
-            duration: const Duration(milliseconds: 400),
-            curve: Curves.easeInOut,
-          );
-        }
       case final ScrollToDateEvent scrollToDateEvent:
         _scrollToDate(scrollToDateEvent.date);
       case TimelineReloadEvent():
@@ -365,22 +357,10 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
               onLoading: widget.loadingWidget != null ? () => widget.loadingWidget! : null,
               onData: (segments) {
                 final childCount = (segments.lastOrNull?.lastIndex ?? -1) + 1;
-                // A [NativeSliverAppBar] draws nothing when it has handed its title
-                // to the native navigation bar, so the space a header would have
-                // taken must not be reserved for it. When it is *not* suppressed it
-                // renders a [MesmerizingSliverAppBar], so it wants that one's
-                // expanded height.
                 final header = widget.appBar;
-                final headerSuppressed = header is NativeSliverAppBar && header.suppressed;
-                final drawsHeader = header != null && !headerSuppressed;
-                // `!plain` because [NativeSliverAppBar] stands in for both of
-                // Immich's sliver headers, and only the cover-photo one expands.
-                // Trash's is an ordinary bar and reserving 200pt for it would
-                // snap the timeline to a header that is not there.
-                final bool headerIsMesmerizing =
-                    header is MesmerizingSliverAppBar ||
-                    (header is NativeSliverAppBar && !headerSuppressed && !header.plain);
-                final double appBarExpandedHeight = drawsHeader && headerIsMesmerizing ? 200 : 0;
+                // A suppressed [NativeSliverAppBar] draws nothing, so reserve no space.
+                final drawsHeader = header != null && !(header is NativeSliverAppBar && header.suppressed);
+                final double appBarExpandedHeight = header is MesmerizingSliverAppBar ? 200 : 0;
                 final topPadding = context.padding.top + (drawsHeader ? kToolbarHeight : 0) + 10;
 
                 const bottomSheetOpenModifier = 120.0;
@@ -407,10 +387,6 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                           else if (widget.appBar != null)
                             widget.appBar!
                           else
-                            // Nothing is drawing a header, so nothing is
-                            // reserving the space one occupies. The bottom
-                            // already gets `padding.bottom`; the top only ever
-                            // got it via the app bar.
                             SliverPadding(padding: EdgeInsets.only(top: context.padding.top)),
                           if (widget.topSliverWidget != null) widget.topSliverWidget!,
                           SliverSegmentedList(

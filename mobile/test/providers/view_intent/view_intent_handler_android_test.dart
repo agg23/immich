@@ -214,14 +214,13 @@ void main() {
     await tester.idle();
 
     verify(() => resolver.resolve(payload)).called(1);
-    // Routes the user to [TabShell, AssetViewer] so back-press lands on the
-    // main timeline — mirrors the home-screen widget navigation pattern.
     final captured = verify(() => router.replaceAll(captureAny())).captured;
     expect(captured, hasLength(1));
     final routes = captured.single as List<PageRouteInfo<dynamic>>;
-    expect(routes, hasLength(2));
-    expect(routes[0].routeName, TabShellRoute.name);
-    expect(routes[1].routeName, AssetViewerRoute.name);
+    expect(routes.map((r) => r.routeName), [TabShellRoute.name]);
+    final photosTab = routes.single.initialChildren!.single;
+    expect(photosTab.routeName, PhotosTabRoute.name);
+    expect(photosTab.initialChildren!.map((r) => r.routeName), [MainTimelineRoute.name, AssetViewerRoute.name]);
   });
 }
 
