@@ -22,12 +22,29 @@ final class FlutterStackController: UIViewController, ShellFlutterHost {
   /// where 47 pages each build their own `appBar:` and there is no shared one
   /// to switch off. Where it is set, the native bar shows it and the Flutter
   /// header is suppressed on the Dart side.
-  private let nativeTitle: String?
+  private var nativeTitle: String?
+  private var actions: [[String: Any]] = []
+
+  /// A page whose header is a cover photo rather than chrome. The bar floats
+  /// over it, transparent, and holds its title back until Dart says the photo
+  /// has scrolled away.
+  private var hero = false
+  private var collapsed = false
+
+  /// What each menu row does, keyed "action.row".
+  ///
+  /// Kept only so a script can run the closure a tap would run: UIKit has no
+  /// public way to perform a `UIAction`, and "the button has a menu" is not
+  /// evidence that choosing a row reaches Dart.
+  private var menuHandlers: [String: () -> Void] = [:]
 
   /// A mirrored frame owns exactly the route it mirrors.
   var surfaceToken: String { shellLabel }
   /// A frame shows the native bar only where the Flutter page gave up its own.
   var prefersNativeBarHidden: Bool { nativeTitle == nil }
+  /// A floating bar must not push the page down: the photo is already drawing
+  /// to the top edge and an inset for the bar would leave a band above it.
+  var prefersFullBleedTop: Bool { hero }
   var still: UIImage?
 
   var flutterContainer: UIView { view }
@@ -35,6 +52,189 @@ final class FlutterStackController: UIViewController, ShellFlutterHost {
   /// Set when this frame is going away because Dart said so, so it does not
   /// turn around and ask Dart to pop what Dart has already popped.
   var suppressDartPop = false
+
+  /// Take the title and actions from a sync.
+  ///
+  /// Separate from `init` because a frame outlives the sync that created it: the
+  /// page behind it rebuilds its header whenever its own state changes, and the
+  /// frame has to follow without being torn down and rebuilt.
+  func apply(title: String?, actions: [[String: Any]], hero: Bool = false) {
+    if hero != self.hero {
+      self.hero = hero
+      applyBarAppearance(animated: false)
+      view.setNeedsLayout()
+    }
+    if title != nativeTitle {
+      nativeTitle = title
+      self.title = barTitle
+      applyChrome(overlayPresent: ShellEngine.shared.overlayPresent)
+    }
+    guard !sameActions(actions) else {
+      shellLog("[shell:nav] %@ bar unchanged (%d actions)", shellLabel, actions.count)
+      return
+    }
+    shellLog("[shell:nav] %@ bar -> [%@]", shellLabel, actions.map { raw in
+      let head = (raw["symbol"] as? String) ?? (raw["label"] as? String) ?? "?"
+      guard let rows = raw["menu"] as? [[String: Any]] else { return head }
+      return "\(head){\(rows.compactMap { $0["label"] as? String }.joined(separator: "/"))}"
+    }.joined(separator: ","))
+    self.actions = actions
+    applyActions()
+  }
+
+  /// Dart crossed the threshold its own title used to fade at.
+  ///
+  /// One message per crossing, so this is where the fade lives: UIKit will not
+  /// animate an appearance swap on its own, and a bar that changed instantly
+  /// under a scrolling photo reads as a glitch rather than a transition.
+  func setCollapsed(_ collapsed: Bool) {
+    guard hero, collapsed != self.collapsed else { return }
+    self.collapsed = collapsed
+    title = barTitle
+    applyBarAppearance(animated: true)
+  }
+
+  /// Nothing over the photo; the album name once the photo has gone.
+  private var barTitle: String? { hero && !collapsed ? "" : nativeTitle }
+
+  private func applyBarAppearance(animated: Bool) {
+    let appearance = UINavigationBarAppearance()
+    if hero && !collapsed {
+      appearance.configureWithTransparentBackground()
+    } else {
+      appearance.configureWithDefaultBackground()
+    }
+    navigationItem.standardAppearance = hero ? appearance : nil
+    navigationItem.scrollEdgeAppearance = hero ? appearance : nil
+    // White over a photo, the bar tint once it has a background —
+    // which is the same pair the Flutter header lerped between.
+    navigationController?.navigationBar.tintColor = hero && !collapsed ? .white : nil
+    guard let bar = navigationController?.navigationBar else { return }
+    if animated {
+      UIView.transition(with: bar, duration: 0.25, options: .transitionCrossDissolve) {
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+      }
+    } else {
+      bar.setNeedsLayout()
+    }
+  }
+
+  private func sameActions(_ other: [[String: Any]]) -> Bool {
+    guard other.count == actions.count else { return false }
+    for (a, b) in zip(actions, other) {
+      if a["symbol"] as? String != b["symbol"] as? String
+        || a["label"] as? String != b["label"] as? String
+        || a["enabled"] as? Bool != b["enabled"] as? Bool
+        || !sameMenu(a["menu"] as? [[String: Any]], b["menu"] as? [[String: Any]]) {
+        return false
+      }
+    }
+    return true
+  }
+
+  /// A menu belongs to a page's state, not to its bar: an album grows a "leave
+  /// album" row the moment it is shared, and every row after it moves down one.
+  /// A `UIMenu` left in place would then fire the wrong callback, so the rows
+  /// are part of what makes two bars the same bar.
+  private func sameMenu(_ a: [[String: Any]]?, _ b: [[String: Any]]?) -> Bool {
+    guard let a, let b else { return (a == nil) == (b == nil) }
+    guard a.count == b.count else { return false }
+    for (x, y) in zip(a, b) {
+      if x["label"] as? String != y["label"] as? String
+        || x["symbol"] as? String != y["symbol"] as? String
+        || x["enabled"] as? Bool != y["enabled"] as? Bool
+        || x["destructive"] as? Bool != y["destructive"] as? Bool {
+        return false
+      }
+    }
+    return true
+  }
+
+  /// The rows Dart sent, as a `UIMenu`.
+  ///
+  /// Destructive rows are pulled into their own inline section at the bottom,
+  /// which is what iOS does and what the Flutter menu spells with a `Divider`
+  /// above a red row. Built from the index Dart gave, not from the position in
+  /// the section, so splitting them does not renumber anything.
+  private func menu(from rows: [[String: Any]], action index: Int) -> UIMenu {
+    var ordinary: [UIAction] = []
+    var destructive: [UIAction] = []
+    menuHandlers = menuHandlers.filter { !$0.key.hasPrefix("\(index).") }
+    for (row, raw) in rows.enumerated() {
+      let enabled = raw["enabled"] as? Bool ?? true
+      let isDestructive = raw["destructive"] as? Bool ?? false
+      var attributes: UIMenuElement.Attributes = []
+      if !enabled { attributes.insert(.disabled) }
+      if isDestructive { attributes.insert(.destructive) }
+      let element = UIAction(
+        title: raw["label"] as? String ?? "",
+        image: (raw["symbol"] as? String).flatMap { UIImage(systemName: $0) },
+        attributes: attributes
+      ) { [weak self] _ in self?.fire(action: index, row: row) }
+      menuHandlers["\(index).\(row)"] = { [weak self] in self?.fire(action: index, row: row) }
+      if isDestructive {
+        destructive.append(element)
+      } else {
+        ordinary.append(element)
+      }
+    }
+    if destructive.isEmpty {
+      return UIMenu(children: ordinary)
+    }
+    return UIMenu(children: ordinary + [UIMenu(options: .displayInline, children: destructive)])
+  }
+
+  private func fire(action index: Int, row: Int) {
+    shellLog("[shell:nav] bar menu %@ #%d row %d", shellLabel, index, row)
+    ShellBridge.shared.barAction(route: shellLabel, index: index, item: row)
+  }
+
+  /// Run what the row's `UIAction` runs. Debug only; see [menuHandlers].
+  func debugPerformMenu(action index: Int, row: Int) -> Bool {
+    guard let handler = menuHandlers["\(index).\(row)"] else { return false }
+    handler()
+    return true
+  }
+
+  private func applyActions() {
+    // Reversed: `rightBarButtonItems` fills from the trailing edge, so the
+    // first item in the array lands furthest right. Flutter's `actions` read
+    // left to right, and a page's primary action is its last one.
+    navigationItem.rightBarButtonItems = actions.enumerated().reversed().map { index, raw in
+      let item: UIBarButtonItem
+      if let rows = raw["menu"] as? [[String: Any]] {
+        // No target and no action: a bar button with a menu opens it itself, so
+        // there is no tap to forward and Dart's own trigger never runs.
+        item = UIBarButtonItem(
+          image: (raw["symbol"] as? String).flatMap { UIImage(systemName: $0) },
+          menu: menu(from: rows, action: index)
+        )
+      } else if let symbol = raw["symbol"] as? String {
+        item = UIBarButtonItem(
+          image: UIImage(systemName: symbol),
+          style: .plain,
+          target: self,
+          action: #selector(barActionTapped(_:))
+        )
+      } else {
+        item = UIBarButtonItem(
+          title: raw["label"] as? String,
+          style: .plain,
+          target: self,
+          action: #selector(barActionTapped(_:))
+        )
+      }
+      item.tag = index
+      item.isEnabled = raw["enabled"] as? Bool ?? true
+      return item
+    }
+  }
+
+  @objc private func barActionTapped(_ sender: UIBarButtonItem) {
+    shellLog("[shell:nav] bar action %@ #%d", shellLabel, sender.tag)
+    ShellBridge.shared.barAction(route: shellLabel, index: sender.tag, item: -1)
+  }
 
   init(label: String, nativeTitle: String?) {
     self.shellLabel = label
@@ -82,7 +282,7 @@ final class FlutterStackController: UIViewController, ShellFlutterHost {
     }
     coordinator.notifyWhenInteractionChanges { [weak self] context in
       guard !context.isCancelled else {
-        NSLog("[shell:nav] swipe-back on %@ cancelled, dart untouched", self?.shellLabel ?? "?")
+        shellLog("[shell:nav] swipe-back on %@ cancelled, dart untouched", self?.shellLabel ?? "?")
         return
       }
       self?.requestDartPop("swipe committed")
@@ -110,7 +310,7 @@ final class FlutterStackController: UIViewController, ShellFlutterHost {
   private func requestDartPop(_ reason: String) {
     guard !dartPopRequested else { return }
     dartPopRequested = true
-    NSLog("[shell:nav] native pop of %@ -> dart (%@)", shellLabel, reason)
+    shellLog("[shell:nav] native pop of %@ -> dart (%@)", shellLabel, reason)
     ShellBridge.shared.requestDartPop(route: shellLabel)
   }
 
@@ -118,7 +318,7 @@ final class FlutterStackController: UIViewController, ShellFlutterHost {
     super.didMove(toParent: parent)
     guard parent == nil else { return }
     if suppressDartPop {
-      NSLog("[shell:nav] native frame removed for %@ (dart-initiated)", shellLabel)
+      shellLog("[shell:nav] native frame removed for %@ (dart-initiated)", shellLabel)
       return
     }
     // A backstop. If `viewWillDisappear` did not fire — an unusual removal, a

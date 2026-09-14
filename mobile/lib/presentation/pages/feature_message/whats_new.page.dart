@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:immich_mobile/domain/models/feature_message.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/presentation/widgets/feature_message/feature_message_placeholder.widget.dart';
 
 @RoutePage()
@@ -13,7 +14,7 @@ class WhatsNewPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final highlights = visibleFeatureMessageHighlights;
     return Scaffold(
-      appBar: AppBar(centerTitle: false, title: Text(context.t.whats_new)),
+      appBar: NativeAppBar(centerTitle: false, title: Text(context.t.whats_new)),
       body: ListView.separated(
         padding: const EdgeInsets.only(top: 16, bottom: 64),
         itemCount: highlights.length,

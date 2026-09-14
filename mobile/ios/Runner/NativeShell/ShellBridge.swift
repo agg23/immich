@@ -50,7 +50,7 @@ final class ShellBridge {
     switch call.method {
     case "ready":
       dartIsReady = true
-      NSLog("[shell] dart ready")
+      shellLog("[shell] dart ready")
       if let route = pendingRoute {
         pendingRoute = nil
         let settle = pendingSettle ?? { _ in }
@@ -59,12 +59,13 @@ final class ShellBridge {
       }
       scheduleDebugNativePage()
       scheduleDebugDartTab()
+      scheduleDebugBarAction()
       if let name = UserDefaults.standard.string(forKey: "immichShellPushRoute") {
         // `-immichShellPushDelay <ms>` holds the push back, so it can be made
         // to happen after a tab switch rather than at launch.
         let delay = Double(UserDefaults.standard.integer(forKey: "immichShellPushDelay")) / 1000
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-          NSLog("[shell:nav] asking dart to push %@", name)
+          shellLog("[shell:nav] asking dart to push %@", name)
           self.channel?.invokeMethod("debugPush", arguments: ["name": name])
         }
       }
@@ -73,18 +74,34 @@ final class ShellBridge {
       let next: AuthState = signedIn ? .signedIn : .signedOut
       guard next != authState else { return }
       authState = next
-      NSLog("[shell] auth signedIn=%@", signedIn ? "yes" : "no")
+      shellLog("[shell] auth signedIn=%@", signedIn ? "yes" : "no")
       onAuthStateChange?(next)
     case "route":
-      NSLog("[shell] dart route=%@", args["name"] as? String ?? "?")
+      shellLog("[shell] dart route=%@", args["name"] as? String ?? "?")
+    case "openViewer":
+      openViewer(
+        session: args["session"] as? Int ?? TimelineSessions.mainSession,
+        index: args["index"] as? Int ?? 0
+      )
     case "log":
       // Dart's own diagnostics, through NSLog so the two sides appear in one
       // ordered stream. `debugPrint` does not reach the device console at all,
       // which is how a routing race stayed invisible.
-      NSLog("[shell:dart] %@", args["text"] as? String ?? "?")
+      shellLog("[shell:dart] %@", args["text"] as? String ?? "?")
+    case "barCollapsed":
+      // Addressed by route rather than by position: a scroll is not a routing
+      // event and the stack may have moved under it.
+      let route = args["route"] as? String ?? ""
+      let collapsed = args["collapsed"] as? Bool ?? false
+      frame(named: route)?.setCollapsed(collapsed)
     case "sync":
       let routes = (args["routes"] as? [[String: Any]] ?? []).map {
-        MirrorFrame(name: $0["name"] as? String ?? "?", title: $0["title"] as? String)
+        MirrorFrame(
+          name: $0["name"] as? String ?? "?",
+          title: $0["title"] as? String,
+          actions: $0["actions"] as? [[String: Any]] ?? [],
+          hero: $0["hero"] as? Bool ?? false
+        )
       }
       let tab = args["tab"] as? String ?? ""
       if args["claimTab"] as? Bool ?? false {
@@ -98,8 +115,43 @@ final class ShellBridge {
         overlay: args["overlay"] as? Bool ?? false
       )
     default:
-      NSLog("[shell] unhandled dart call %@", call.method)
+      shellLog("[shell] unhandled dart call %@", call.method)
     }
+  }
+
+  // MARK: - The asset viewer
+
+  /// Open the native viewer in place of Immich's Flutter one.
+  ///
+  /// Dart never pushes `AssetViewerRoute` under the shell: a guard intercepts
+  /// it and calls this instead. So there is no mirrored frame for the viewer
+  /// and nothing for [reconcile] to reconcile, which is the whole reason this
+  /// is a call rather than another kind of frame. The viewer is not a Flutter
+  /// route being decorated natively -- it is a native screen that has replaced
+  /// one, and the stack Dart reports is the same before and after.
+  ///
+  /// It also sidesteps the thing that made the Flutter viewer awkward to mirror
+  /// at all: that route is `opaque: false`, a layer over the page it was opened
+  /// from rather than a frame on top of it, and giving a layer a native frame
+  /// played both transitions at once.
+  private func openViewer(session: Int, index: Int) {
+    guard let nav = activeNavigationController else {
+      shellLog("[shell:nav] viewer at %ld with no native stack to put it in", index)
+      return
+    }
+    guard let source = TimelineSessions.shared.source(for: session) else { return }
+    let viewer = AssetViewerController(source: source, startIndex: index)
+    viewer.onClosed = {
+      // Dart is holding a subscription to that page's timeline for as long as
+      // this viewer is up. Nothing else will tell it the viewer is gone: the
+      // route was never pushed, so no pop is coming.
+      TimelineSessions.shared.close(session: session)
+    }
+    shellLog("[shell:nav] native viewer at %ld on session %ld over %@", index, session, describe(nav))
+    // No zoom flight: the push does not start from a native tile. The grid's
+    // transition delegate declines anything that is not coming from the grid
+    // itself, so this correctly gets the system push.
+    nav.pushViewController(viewer, animated: true)
   }
 
   // MARK: - Stack mirroring
@@ -139,7 +191,7 @@ final class ShellBridge {
           let index = NativeShellController.Tab.allCases.firstIndex(where: { $0.rawValue == tab }),
           index < (shell.viewControllers?.count ?? 0),
           shell.selectedIndex != index else { return }
-    NSLog("[shell:nav] dart moved to %@", tab)
+    shellLog("[shell:nav] dart moved to %@", tab)
     shell.selectedIndex = index
   }
 
@@ -160,9 +212,24 @@ final class ShellBridge {
     return shell.viewControllers?[index] as? UINavigationController
   }
 
+  /// The mirrored frame for a route, wherever it is in the active stack.
+  private func frame(named route: String) -> FlutterStackController? {
+    activeNavigationController?.viewControllers
+      .compactMap { $0 as? FlutterStackController }
+      .first { $0.shellLabel == route }
+  }
+
   struct MirrorFrame {
     let name: String
     let title: String?
+    /// The page's own app bar actions, already reduced by Dart to a symbol or a
+    /// label. A page whose header could not be translated sends none and keeps
+    /// its Flutter header instead, so an empty list here is not "no actions" --
+    /// it is "this page is not using the native bar".
+    let actions: [[String: Any]]
+    /// A page whose header is a cover photo. Its bar floats over the page
+    /// instead of sitting above it.
+    let hero: Bool
   }
 
   /// Make the native stack agree with the stack Dart just described.
@@ -175,10 +242,20 @@ final class ShellBridge {
   /// it, which is how a back tap ended up switching tabs.
   private func reconcile(to frames: [MirrorFrame], tab: String) {
     guard let nav = navigationController(forTab: tab) else {
-      NSLog("[shell:nav] sync [%@] with no native stack to put it in", frames.map(\.name).joined(separator: ","))
+      shellLog("[shell:nav] sync [%@] with no native stack to put it in", frames.map(\.name).joined(separator: ","))
       return
     }
     let current = nav.viewControllers
+    // A native screen the shell pushed itself -- the asset viewer -- sits above
+    // the mirrored frames and Dart does not know it is there. Reconciling under
+    // it would rebuild the stack from frames that cannot describe it, and
+    // `setViewControllers` would take the viewer off the screen the user is
+    // looking at. Dart's stack cannot legitimately change while it is up, so
+    // doing nothing is both safe and correct.
+    if (current.last as? AssetViewerController) != nil {
+      shellLog("[shell:nav] sync [%@] under the native viewer, ignored", frames.map(\.name).joined(separator: ","))
+      return
+    }
     // The tab root, which is not part of the mirror and never moves.
     let base = current.prefix { !($0 is FlutterStackController) }
     let existing = current.compactMap { $0 as? FlutterStackController }
@@ -187,6 +264,15 @@ final class ShellBridge {
     while shared < existing.count, shared < frames.count, existing[shared].shellLabel == frames[shared].name {
       shared += 1
     }
+
+    // A frame that is staying can still have a different bar: a page's actions
+    // are built from its own state, and the memories filter changes its icon
+    // without touching the stack at all. Applied before the early return, which
+    // is the path every one of those syncs takes.
+    for (index, frame) in frames.prefix(shared).enumerated() {
+      existing[index].apply(title: frame.title, actions: frame.actions, hero: frame.hero)
+    }
+
     guard shared != existing.count || shared != frames.count else { return }
 
     // Frames being dropped must not turn around and ask Dart to pop what Dart
@@ -197,10 +283,12 @@ final class ShellBridge {
 
     var target: [UIViewController] = Array(base) + Array(existing.prefix(shared))
     for frame in frames.dropFirst(shared) {
-      target.append(FlutterStackController(label: frame.name, nativeTitle: frame.title))
+      let controller = FlutterStackController(label: frame.name, nativeTitle: frame.title)
+      controller.apply(title: frame.title, actions: frame.actions, hero: frame.hero)
+      target.append(controller)
     }
 
-    NSLog(
+    shellLog(
       "[shell:nav] sync %@ -> [%@]",
       describe(nav),
       target.map { ($0 as? ShellFlutterHost)?.shellLabel ?? "?" }.joined(separator: ",")
@@ -245,7 +333,7 @@ final class ShellBridge {
     // check — the two stacks must now survive it.
     if UserDefaults.standard.bool(forKey: "immichShellCancelSwipe") {
       DispatchQueue.main.asyncAfter(deadline: .now() + cycleDelay) { [weak nav] in
-        NSLog("[shell:nav] debug: swipe started then cancelled, frame stays: %@", nav.map(self.describe) ?? "?")
+        shellLog("[shell:nav] debug: swipe started then cancelled, frame stays: %@", nav.map(self.describe) ?? "?")
         self.requestDartPop(route: (nav?.viewControllers.last as? ShellFlutterHost)?.shellLabel ?? "?")
         self.scheduleDebugRepush()
       }
@@ -259,7 +347,7 @@ final class ShellBridge {
     if UserDefaults.standard.bool(forKey: "immichShellFakeSwipe") {
       DispatchQueue.main.asyncAfter(deadline: .now() + cycleDelay) { [weak nav] in
         guard let nav, let top = nav.viewControllers.last as? FlutterStackController else { return }
-        NSLog("[shell:nav] debug: dragging %@ away with dart untouched", top.shellLabel)
+        shellLog("[shell:nav] debug: dragging %@ away with dart untouched", top.shellLabel)
         top.suppressDartPop = true
         nav.popViewController(animated: true)
       }
@@ -270,10 +358,10 @@ final class ShellBridge {
       guard let nav else { return }
       switch origin {
       case "native":
-        NSLog("[shell:nav] debug: popping natively from %@", self.describe(nav))
+        shellLog("[shell:nav] debug: popping natively from %@", self.describe(nav))
         nav.popViewController(animated: true)
       case "dart":
-        NSLog("[shell:nav] debug: asking dart to pop")
+        shellLog("[shell:nav] debug: asking dart to pop")
         self.channel?.invokeMethod("debugPop", arguments: nil)
       default:
         break
@@ -284,7 +372,7 @@ final class ShellBridge {
       // tab bar still saying Search.
       if UserDefaults.standard.bool(forKey: "immichShellStrayPop") {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-          NSLog("[shell:nav] debug: stray pop request, no native frame for it")
+          shellLog("[shell:nav] debug: stray pop request, no native frame for it")
           self.requestDartPop(route: "VideoRoute")
         }
       }
@@ -312,15 +400,56 @@ final class ShellBridge {
     guard delay > 0 else { return }
     let channel = FlutterMethodChannel(name: "immich/timeline", binaryMessenger: engine.binaryMessenger)
     DispatchQueue.main.asyncAfter(deadline: .now() + Double(delay) / 1000) {
-      NSLog("[shell:nav] debug: opening the flutter asset viewer")
-      channel.invokeMethod("debugOpenViewer", arguments: nil)
-      // And close it again from Dart, as its own back button does. Closing is
-      // the half that must not disturb the native stack: the frame underneath
-      // was never popped, so nothing native should move.
+      shellLog("[shell:nav] debug: opening the flutter asset viewer")
+      channel.invokeMethod(
+        "debugOpenViewer",
+        arguments: ["timeline": UserDefaults.standard.string(forKey: "immichShellViewerTimeline") ?? "main"]
+      )
+      // And close it again the way its back button does. Under the shell that
+      // is a native pop, not a Dart one: the route was declined, so Dart has
+      // nothing to pop and asking it to would pop the page underneath instead.
       DispatchQueue.main.asyncAfter(deadline: .now() + self.cycleDelay) {
-        NSLog("[shell:nav] debug: closing the flutter asset viewer")
-        self.channel?.invokeMethod("debugPop", arguments: nil)
+        if self.activeNavigationController?.topViewController is AssetViewerController {
+          shellLog("[shell:nav] debug: closing the native asset viewer")
+          self.activeNavigationController?.popViewController(animated: true)
+        } else {
+          shellLog("[shell:nav] debug: closing the flutter asset viewer")
+          self.channel?.invokeMethod("debugPop", arguments: nil)
+        }
       }
+    }
+  }
+
+  /// `-immichShellOpenAlbum <ms>` opens the first album the server returns.
+  ///
+  /// `-immichShellPushRoute` can only name a route, and every page worth
+  /// looking at right now takes an argument. Sent on the timeline channel for
+  /// the same reason the viewer hook is: that is where the `Ref` that can
+  /// fetch a `RemoteAlbum` lives.
+  func scheduleDebugAlbum(on engine: FlutterEngine) {
+    let delay = UserDefaults.standard.integer(forKey: "immichShellOpenAlbum")
+    guard delay > 0 else { return }
+    let channel = FlutterMethodChannel(name: "immich/timeline", binaryMessenger: engine.binaryMessenger)
+    DispatchQueue.main.asyncAfter(deadline: .now() + Double(delay) / 1000) {
+      shellLog("[shell:nav] debug: opening an album")
+      channel.invokeMethod("debugPushAlbum", arguments: nil)
+    }
+  }
+  /// `-immichShellScroll <ms>` scrolls the visible timeline, and
+  /// `-immichShellScrollTo <points>` says how far (default 600).
+  ///
+  /// The simulator accepts no touch input from a script, so anything driven by
+  /// a scroll — a cover photo collapsing, a native bar taking over its title —
+  /// has no other way to be exercised.
+  func scheduleDebugScroll(on engine: FlutterEngine) {
+    let delay = UserDefaults.standard.integer(forKey: "immichShellScroll")
+    guard delay > 0 else { return }
+    let requested = UserDefaults.standard.integer(forKey: "immichShellScrollTo")
+    let offset = requested > 0 ? requested : 600
+    let channel = FlutterMethodChannel(name: "immich/timeline", binaryMessenger: engine.binaryMessenger)
+    DispatchQueue.main.asyncAfter(deadline: .now() + Double(delay) / 1000) {
+      shellLog("[shell:nav] debug: scrolling to %d", offset)
+      channel.invokeMethod("debugScroll", arguments: ["offset": offset])
     }
   }
 
@@ -342,7 +471,7 @@ final class ShellBridge {
     guard delay > 0 else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + Double(delay) / 1000) {
       guard let nav = self.activeNavigationController else {
-        NSLog("[shell:nav] debug: no navigation controller for the native control page")
+        shellLog("[shell:nav] debug: no navigation controller for the native control page")
         return
       }
       let page = DebugNativePageController()
@@ -350,7 +479,7 @@ final class ShellBridge {
       // Everything else about this page is stock UIKit.
       page.hidesBottomBarWhenPushed = true
 
-      NSLog("[shell:nav] debug: pushing the native control page onto %@", self.describe(nav))
+      shellLog("[shell:nav] debug: pushing the native control page onto %@", self.describe(nav))
       nav.pushViewController(page, animated: true)
     }
   }
@@ -360,7 +489,7 @@ final class ShellBridge {
     debugCyclesLeft -= 1
     let left = debugCyclesLeft
     DispatchQueue.main.asyncAfter(deadline: .now() + cycleDelay) {
-      NSLog("[shell:nav] debug: cycle re-push %@ (%d left after this)", name, left)
+      shellLog("[shell:nav] debug: cycle re-push %@ (%d left after this)", name, left)
       self.channel?.invokeMethod("debugPush", arguments: ["name": name])
     }
   }
@@ -383,12 +512,51 @@ final class ShellBridge {
 
   // MARK: - Geometry
 
+  /// `-immichShellTapBarAction <ms>` taps the first action on whatever frame is
+  /// on top, twice, a second apart.
+  ///
+  /// Through the real `UIBarButtonItem` target/action, so it exercises the
+  /// whole round trip -- native tap, Dart callback, page state change, the bar
+  /// it republishes, and the item this side rebuilds from it. Twice because a
+  /// toggle that only ever went one way would look identical to one that
+  /// applied once and stuck.
+  func scheduleDebugBarAction() {
+    let delay = UserDefaults.standard.integer(forKey: "immichShellTapBarAction")
+    guard delay > 0 else { return }
+    for (index, offset) in [Double(delay) / 1000, Double(delay) / 1000 + 1.5].enumerated() {
+      DispatchQueue.main.asyncAfter(deadline: .now() + offset) {
+        guard let top = self.activeNavigationController?.viewControllers.last,
+              let item = top.navigationItem.rightBarButtonItems?.first else {
+          shellLog("[shell:nav] debug: no bar action to tap")
+          return
+        }
+        // A bar button with a menu has no target or action -- UIKit opens the
+        // menu itself -- so the two passes choose two different rows instead,
+        // which is also the more interesting test: the rows must not be
+        // interchangeable.
+        if item.menu != nil, let frame = top as? FlutterStackController {
+          shellLog("[shell:nav] debug: choosing menu row %d", index)
+          if !frame.debugPerformMenu(action: 0, row: index) {
+            shellLog("[shell:nav] debug: no menu row %d", index)
+          }
+          return
+        }
+        guard let target = item.target, let action = item.action else {
+          shellLog("[shell:nav] debug: bar action has neither menu nor target")
+          return
+        }
+        shellLog("[shell:nav] debug: tapping bar action, pass %d", index + 1)
+        _ = target.perform(action, with: item)
+      }
+    }
+  }
+
   /// `-immichShellDartTab <tab>` makes Dart change tab on its own after a
   /// delay, which is the only way to see whether the native tab bar follows.
   func scheduleDebugDartTab() {
     guard let tab = UserDefaults.standard.string(forKey: "immichShellDartTab") else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
-      NSLog("[shell] debug: asking dart to switch to %@", tab)
+      shellLog("[shell] debug: asking dart to switch to %@", tab)
       self?.channel?.invokeMethod("debugTab", arguments: ["tab": tab])
     }
   }
@@ -398,6 +566,14 @@ final class ShellBridge {
   /// Fire-and-forget: Dart pops and the sync that follows drives the native
   /// removal, so the pop animation comes out of `reconcile` like every other
   /// one rather than from a second call here racing it.
+  /// A native bar button was tapped. Dart holds the callback, so the index it
+  /// published is the whole identity -- there is no action name to invent and
+  /// no registry on this side to keep in step.
+  /// `item` is the menu row, or -1 for a plain button.
+  func barAction(route: String, index: Int, item: Int) {
+    channel?.invokeMethod("barAction", arguments: ["route": route, "index": index, "item": item])
+  }
+
   func popToRoot(tab: String) {
     channel?.invokeMethod("popToRoot", arguments: ["tab": tab])
   }
@@ -416,7 +592,7 @@ final class ShellBridge {
         "right": Double(insets.right),
       ]
     )
-    NSLog("[shell] insets top=%.0f bottom=%.0f", insets.top, insets.bottom)
+    shellLog("[shell] insets top=%.0f bottom=%.0f", insets.top, insets.bottom)
   }
 
   /// Ask Dart to show `route` and call back once it has actually rendered it.
@@ -439,7 +615,7 @@ final class ShellBridge {
   }
 
   private func send(route: String, whenSettled: @escaping (String) -> Void) {
-    NSLog("[shell] show route=%@", route)
+    shellLog("[shell] show route=%@", route)
     guard let channel else {
       whenSettled("")
       return

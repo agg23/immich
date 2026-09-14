@@ -10,6 +10,7 @@ import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
 import 'package:immich_mobile/extensions/theme_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/presentation/widgets/backup/backup_toggle_button.widget.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
@@ -104,7 +105,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: NativeAppBar(
         elevation: 0,
         title: Text(context.t.backup_controller_page_backup),
         leading: IconButton(

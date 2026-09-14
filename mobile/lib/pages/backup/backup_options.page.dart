@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
@@ -69,7 +70,7 @@ class BackupOptionsPage extends ConsumerWidget {
         }
       },
       child: Scaffold(
-        appBar: AppBar(title: Text(context.t.backup_options)),
+        appBar: NativeAppBar(title: Text(context.t.backup_options)),
         body: const BackupSettings(),
       ),
     );

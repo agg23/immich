@@ -7,6 +7,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/extensions/asyncvalue_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/models/shared_link/shared_link.model.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/providers/shared_link.provider.dart';
 import 'package:immich_mobile/widgets/shared_link/shared_link_item.dart';
 
@@ -68,7 +69,7 @@ class SharedLinkPage extends HookConsumerWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text(context.t.shared_link_app_bar_title), elevation: 0, centerTitle: false),
+      appBar: NativeAppBar(title: Text(context.t.shared_link_app_bar_title), elevation: 0, centerTitle: false),
       body: SafeArea(
         child: sharedLinks.widgetWhen(
           onError: (error, stackTrace) => buildNoShares(),

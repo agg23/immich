@@ -12,6 +12,7 @@ import 'package:immich_mobile/extensions/theme_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/models/folder/recursive_folder.model.dart';
 import 'package:immich_mobile/models/folder/root_folder.model.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/pages/common/large_leading_tile.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_viewer.page.dart';
 import 'package:immich_mobile/presentation/widgets/images/thumbnail_tile.widget.dart';
@@ -81,7 +82,7 @@ class FolderPage extends HookConsumerWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: NativeAppBar(
         title: Text(currentFolder.value?.name ?? context.t.folders),
         elevation: 0,
         centerTitle: false,

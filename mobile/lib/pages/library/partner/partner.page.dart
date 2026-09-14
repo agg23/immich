@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/presentation/actions/action.widget.dart';
 import 'package:immich_mobile/presentation/actions/partner.action.dart';
 import 'package:immich_mobile/presentation/widgets/people/partner_user_avatar.widget.dart';
@@ -29,7 +30,7 @@ class PartnerPage extends ConsumerWidget {
     final sharedByAsync = ref.watch(partnersStateProvider);
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: NativeAppBar(
         title: Text(context.t.partners),
         elevation: 0,
         centerTitle: false,

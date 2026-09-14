@@ -7,6 +7,7 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:immich_mobile/domain/models/log.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 
 @RoutePage()
 class AppLogDetailPage extends HookWidget {
@@ -106,7 +107,7 @@ class AppLogDetailPage extends HookWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text(context.t.log_detail_title)),
+      appBar: NativeAppBar(title: Text(context.t.log_detail_title)),
       body: SafeArea(
         child: ListView(
           children: [

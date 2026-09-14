@@ -7,6 +7,7 @@ import 'package:immich_mobile/domain/models/person.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/string_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/presentation/widgets/images/remote_image_provider.dart';
 import 'package:immich_mobile/providers/infrastructure/people.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
@@ -42,7 +43,7 @@ class _PeopleCollectionPageState extends ConsumerState<PeopleCollectionPage> {
         final isPortrait = context.orientation == Orientation.portrait;
 
         return Scaffold(
-          appBar: AppBar(
+          appBar: NativeAppBar(
             automaticallyImplyLeading: _search == null,
             title: _search != null
                 ? SearchField(

@@ -307,6 +307,20 @@ final remoteAlbumDateRangeProvider = StreamProvider.autoDispose.family<(DateTime
   return service.watchDateRange(albumId);
 });
 
+/// The signed-in user's role on an album.
+///
+/// A provider rather than the `FutureBuilder` the album app bar used to wrap
+/// its overflow menu in. The menu has to reach `actions:` as itself for the
+/// native bar to be able to read it, and a builder around it is as opaque as
+/// the hand-rolled menu it replaced.
+final remoteAlbumUserRoleProvider = FutureProvider.autoDispose.family<AlbumUserRole?, String>((ref, albumId) {
+  final userId = ref.watch(currentUserProvider)?.id;
+  if (userId == null) {
+    return null;
+  }
+  return ref.watch(remoteAlbumServiceProvider).getUserRole(albumId, userId);
+});
+
 final remoteAlbumSharedUsersProvider = FutureProvider.autoDispose.family<List<UserDto>, String>((ref, albumId) async {
   final link = ref.keepAlive();
   ref.onDispose(() => link.close());

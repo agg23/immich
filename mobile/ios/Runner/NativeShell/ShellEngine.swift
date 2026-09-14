@@ -55,12 +55,15 @@ final class ShellEngine {
   private init() {
     engine = FlutterEngine(name: "immich-shell", project: nil, allowHeadlessExecution: true)
     let started = engine.run()
-    NSLog("[shell] engine run=%@", started ? "yes" : "no")
+    shellLog("[shell] engine run=%@", started ? "yes" : "no")
     // The same registration the implicit path would have done for us.
     GeneratedPluginRegistrant.register(with: engine)
     AppDelegate.registerPlugins(with: engine, messenger: engine.binaryMessenger)
     ShellBridge.shared.attach(to: engine)
+    TimelineSessions.shared.attach(to: engine)
     ShellBridge.shared.scheduleDebugViewer(on: engine)
+    ShellBridge.shared.scheduleDebugAlbum(on: engine)
+    ShellBridge.shared.scheduleDebugScroll(on: engine)
   }
 
   // MARK: - What is on screen
@@ -98,7 +101,7 @@ final class ShellEngine {
     dartSurface = surface
     if overlayPresent != overlay {
       overlayPresent = overlay
-      NSLog("[shell] flutter overlay %@", overlay ? "opened" : "closed")
+      shellLog("[shell] flutter overlay %@", overlay ? "opened" : "closed")
       holder?.applyChrome(overlayPresent: overlay)
     }
     updatePlacement()
@@ -136,7 +139,7 @@ final class ShellEngine {
     // the ordinary mid-swipe state, where the live page is the one being dragged
     // away under the user's thumb and everything else shows a still.
     if let holder, visible.contains(where: { $0 === holder }) {
-      NSLog(
+      shellLog(
         "[shell] dart is showing %@; surface stays with %@ until dart moves",
         dartSurface.isEmpty ? "(nothing)" : dartSurface,
         holder.shellLabel
@@ -152,7 +155,7 @@ final class ShellEngine {
     // until the deadline gives up. A page that is briefly the wrong one
     // recovers; a frozen one does not.
     guard let front = visible.last else { return }
-    NSLog("[shell] nothing live on screen; surface goes to %@ ahead of dart", front.shellLabel)
+    shellLog("[shell] nothing live on screen; surface goes to %@ ahead of dart", front.shellLabel)
     attachSurface(to: front)
     // Ask straight away rather than waiting for the answer to whatever question
     // is already outstanding. Without this the reveal costs an extra round trip
@@ -197,7 +200,7 @@ final class ShellEngine {
     vc.view.backgroundColor = .systemBackground
     flutterVC = vc
     vc.setFlutterViewDidRenderCallback {
-      NSLog("[shell] attach#%d first frame=%.1fms", attach, (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
+      shellLog("[shell] attach#%d first frame=%.1fms", attach, (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
     }
 
     host.addChild(vc)
@@ -208,7 +211,7 @@ final class ShellEngine {
     vc.didMove(toParent: host)
     holder = host
 
-    NSLog("[shell] attach#%d host=%@ token=%@", attach, host.shellLabel, host.surfaceToken)
+    shellLog("[shell] attach#%d host=%@ token=%@", attach, host.shellLabel, host.surfaceToken)
 
     // Before Dart is running there is nothing correct to wait for and nothing
     // wrong to hide: the surface renders the splash and that is the right
@@ -228,7 +231,7 @@ final class ShellEngine {
 
     DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleDeadline) { [weak self, weak host] in
       guard let host, self?.holder === host, host.isWaitingForDart else { return }
-      NSLog("[shell] attach#%d settle deadline expired", attach)
+      shellLog("[shell] attach#%d settle deadline expired", attach)
       host.reveal()
     }
   }
@@ -250,7 +253,7 @@ final class ShellEngine {
         updatePlacement()
         return
       }
-      NSLog("[shell] %@ revealed in %.1fms", holder.shellLabel, (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
+      shellLog("[shell] %@ revealed in %.1fms", holder.shellLabel, (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
       holder.reveal()
       // With the right thing on screen, take the picture that will stand in for
       // this container the next time the surface is somewhere else.
@@ -295,6 +298,9 @@ protocol ShellFlutterHost: UIViewController {
   /// Whether this container wants the native navigation bar out of the way even
   /// when nothing is covering it — true for pages that draw their own header.
   var prefersNativeBarHidden: Bool { get }
+  /// Whether this container draws to the top edge with the bar floating over
+  /// it, rather than starting below the bar.
+  var prefersFullBleedTop: Bool { get }
   /// A picture of this container's content, taken by Flutter while it was live.
   var still: UIImage? { get set }
   /// How the surface is constrained inside the container. Separate from
@@ -304,6 +310,10 @@ protocol ShellFlutterHost: UIViewController {
 }
 
 extension ShellFlutterHost {
+  /// Almost nothing floats its bar: a page that gives up its Flutter header
+  /// wants the space the native one occupies.
+  var prefersFullBleedTop: Bool { false }
+
   /// Push this container's obscured edges to Dart.
   ///
   /// `view.safeAreaInsets` is exactly the right number and UIKit has already
@@ -328,6 +338,14 @@ extension ShellFlutterHost {
     // still supplies it, we just have to ask the right view.
     if hidesBottomBarWhenPushed, let window = view.window {
       insets.bottom = window.safeAreaInsets.bottom
+    }
+    // The same correction at the other edge, for the same reason: the number
+    // UIKit reports is right for a page that starts below the bar and wrong
+    // for one the bar floats over. A cover photo is already drawing to the top
+    // edge, and telling Dart the top 116pt are covered would leave a band
+    // above the photo exactly the height of the bar.
+    if prefersFullBleedTop, let window = view.window {
+      insets.top = window.safeAreaInsets.top
     }
     // A placement happens before the container has been laid out, so the first
     // reading is all zeros — and Dart acting on it lays the page out under the
@@ -364,7 +382,7 @@ extension ShellFlutterHost {
   func installStill() {
     clearStill()
     guard let still else {
-      NSLog("[shell] no still for %@ yet", shellLabel)
+      shellLog("[shell] no still for %@ yet", shellLabel)
       return
     }
     let image = UIImageView(image: still)

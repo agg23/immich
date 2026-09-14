@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart' hide Store;
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/settings/advanced_settings.dart';
 import 'package:immich_mobile/widgets/settings/asset_list_settings/asset_list_settings.dart';
@@ -79,7 +80,7 @@ class SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(centerTitle: false, title: Text(context.t.settings)),
+      appBar: NativeAppBar(centerTitle: false, title: Text(context.t.settings)),
       body: context.isMobile ? const _MobileLayout() : const _TabletLayout(),
     );
   }
@@ -173,7 +174,7 @@ class SettingsSubPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(centerTitle: false, title: Text(section.title(context.t))),
+      appBar: NativeAppBar(centerTitle: false, title: Text(section.title(context.t))),
       body: section.widget,
     );
   }

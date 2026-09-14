@@ -8,6 +8,7 @@ import 'package:immich_mobile/domain/services/log.service.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/theme_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/services/immich_logger.service.dart';
 import 'package:intl/intl.dart';
@@ -50,7 +51,7 @@ class AppLogPage extends HookWidget {
     };
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: NativeAppBar(
         title: Text(context.t.logs, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16.0)),
         scrolledUnderElevation: 1,
         elevation: 2,

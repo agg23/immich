@@ -35,7 +35,7 @@ final class ShellRootController: UIViewController {
       next = NativeShellController()
     }
     if let current, type(of: current) == type(of: next) { return }
-    NSLog("[shell] root -> %@", String(describing: type(of: next)))
+    shellLog("[shell] root -> %@", String(describing: type(of: next)))
     swap(to: next)
   }
 

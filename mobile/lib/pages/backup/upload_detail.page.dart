@@ -4,6 +4,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/presentation/widgets/images/thumbnail.widget.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
@@ -79,7 +80,7 @@ class _UploadDetailPageState extends ConsumerState<UploadDetailPage> {
     final failedItems = uploadItems.values.where((item) => item.isFailed == true).toList();
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: NativeAppBar(
         title: Text(context.t.upload_details),
         backgroundColor: context.colorScheme.surface,
         elevation: 0,

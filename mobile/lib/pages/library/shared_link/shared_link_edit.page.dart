@@ -8,6 +8,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/models/shared_link/shared_link.model.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/shared_link.provider.dart';
 import 'package:immich_mobile/services/shared_link.service.dart';
@@ -441,7 +442,7 @@ class SharedLinkEditPage extends HookConsumerWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: NativeAppBar(
         title: Text(existingLink == null ? context.t.create_link_to_share : context.t.edit_link),
         elevation: 0,
         leading: const CloseButton(),

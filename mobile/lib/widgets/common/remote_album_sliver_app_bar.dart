@@ -12,6 +12,9 @@ import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/datetime_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_bar_actions.dart';
+import 'package:immich_mobile/native_shell/native_bar_menu.dart';
+import 'package:immich_mobile/native_shell/native_shell.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
 import 'package:immich_mobile/providers/infrastructure/current_album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/remote_album.provider.dart';
@@ -24,13 +27,16 @@ class RemoteAlbumSliverAppBar extends ConsumerStatefulWidget {
   const RemoteAlbumSliverAppBar({
     super.key,
     this.icon = Icons.camera,
-    required this.kebabMenu,
+    required this.kebabItems,
     this.onEditTitle,
     this.onActivity,
   });
 
   final IconData icon;
-  final Widget kebabMenu;
+  /// The overflow menu, as rows rather than as a widget: the page owns what
+  /// they do, this bar owns what they look like, and a `NativeBarMenu` is only
+  /// readable by the native bar if it sits in `actions:` unwrapped.
+  final List<NativeBarMenuItem> kebabItems;
   final void Function()? onEditTitle;
   final void Function()? onActivity;
 
@@ -39,6 +45,7 @@ class RemoteAlbumSliverAppBar extends ConsumerStatefulWidget {
 }
 
 class _MesmerizingSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBar> {
+  static const _route = 'RemoteAlbumRoute';
   double _scrollProgress = 0.0;
 
   double _calculateScrollProgress(FlexibleSpaceBarSettings? settings) {
@@ -72,13 +79,45 @@ class _MesmerizingSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBa
         const Shadow(offset: Offset(0, 2), blurRadius: 0, color: Colors.transparent),
     ];
 
+    final actions = <Widget>[
+      IconButton(
+        onPressed: () => context.pushRoute(SlideshowRoute(timeline: ref.read(timelineServiceProvider))),
+        icon: Icon(Icons.slideshow_outlined, color: actionIconColor, shadows: actionIconShadows),
+      ),
+      if (currentAlbum.isActivityEnabled && currentAlbum.isShared)
+        IconButton(
+          icon: Icon(Icons.chat_outlined, color: actionIconColor, shadows: actionIconShadows),
+          onPressed: widget.onActivity,
+        ),
+      NativeBarMenu(
+        icon: Icons.more_vert_rounded,
+        iconColor: actionIconColor,
+        iconShadows: actionIconShadows,
+        items: widget.kebabItems,
+      ),
+    ];
+
+    // Unlike every other page the shell takes over, this header is not chrome
+    // and does not go away: the cover photo *is* the page. Only the row of
+    // controls across the top of it moves to the native bar, which then floats
+    // over the photo rather than sitting above it.
+    final native = translateActions(actions);
+    final hero = NativeShell.isActive && native != null;
+    if (hero) {
+      NativeShell.publishBar(_route, title: currentAlbum.name, actions: native, hero: true);
+    } else if (NativeShell.isActive) {
+      NativeShell.logFallback(_route, untranslatableAction(actions) ?? 'no reason');
+    }
+
     return SliverAppBar(
       expandedHeight: 400.0,
       floating: false,
       pinned: true,
       snap: false,
       elevation: 0,
-      leading: isMultiSelectEnabled
+      // The native bar brings its own chevron, and its own buttons.
+      automaticallyImplyLeading: !hero,
+      leading: isMultiSelectEnabled || hero
           ? const SizedBox.shrink()
           : IconButton(
               icon: Icon(
@@ -88,19 +127,10 @@ class _MesmerizingSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBa
               ),
               onPressed: () => context.maybePop(),
             ),
-      actions: [
-        IconButton(
-          onPressed: () => context.pushRoute(SlideshowRoute(timeline: ref.read(timelineServiceProvider))),
-          icon: Icon(Icons.slideshow_outlined, color: actionIconColor, shadows: actionIconShadows),
-        ),
-        if (currentAlbum.isActivityEnabled && currentAlbum.isShared)
-          IconButton(
-            icon: Icon(Icons.chat_outlined, color: actionIconColor, shadows: actionIconShadows),
-            onPressed: widget.onActivity,
-          ),
-        widget.kebabMenu,
-      ],
-      title: Builder(
+      actions: hero ? const [] : actions,
+      title: hero
+          ? null
+          : Builder(
         builder: (context) {
           final settings = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
           final scrollProgress = _calculateScrollProgress(settings);
@@ -123,7 +153,15 @@ class _MesmerizingSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBa
 
           // Update scroll progress for the leading button
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _scrollProgress != scrollProgress) {
+            if (!mounted) {
+              return;
+            }
+            // Same threshold the Flutter title used, so the native bar takes
+            // over at the point the page always handed the title across.
+            if (hero) {
+              NativeShell.setBarCollapsed(_route, collapsed: scrollProgress > 0.95);
+            }
+            if (_scrollProgress != scrollProgress) {
               setState(() {
                 _scrollProgress = scrollProgress;
               });

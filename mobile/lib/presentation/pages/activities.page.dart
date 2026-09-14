@@ -7,6 +7,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/extensions/asyncvalue_extensions.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/presentation/widgets/action_buttons/like_activity_action_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/album/activity_text_field.dart';
 import 'package:immich_mobile/providers/activity.provider.dart';
@@ -43,7 +44,7 @@ class ActivitiesPage extends HookConsumerWidget {
     return ProviderScope(
       overrides: [currentRemoteAlbumScopedProvider.overrideWithValue(album)],
       child: Scaffold(
-        appBar: AppBar(
+        appBar: NativeAppBar(
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

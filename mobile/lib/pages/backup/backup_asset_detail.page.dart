@@ -7,6 +7,7 @@ import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/theme_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/pages/common/large_leading_tile.dart';
 import 'package:immich_mobile/presentation/widgets/images/thumbnail.widget.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
@@ -21,7 +22,7 @@ class BackupAssetDetailPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final AsyncValue<List<LocalAsset>> result = ref.watch(backupCandidateProvider);
     return Scaffold(
-      appBar: AppBar(title: Text(context.t.backup_controller_page_remainder)),
+      appBar: NativeAppBar(title: Text(context.t.backup_controller_page_remainder)),
       body: result.when(
         data: (List<LocalAsset> candidates) {
           return ListView.separated(

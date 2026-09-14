@@ -11,6 +11,7 @@ import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/theme_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/presentation/pages/user_selection.page.dart';
 import 'package:immich_mobile/providers/auth.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
@@ -205,7 +206,7 @@ class AlbumOptionsPage extends HookConsumerWidget {
     return ProviderScope(
       overrides: [currentRemoteAlbumScopedProvider.overrideWithValue(album)],
       child: Scaffold(
-        appBar: AppBar(
+        appBar: NativeAppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_new_rounded),
             onPressed: () => context.maybePop(null),

@@ -24,9 +24,9 @@ final class ShellSceneDelegate: UIResponder, UIWindowSceneDelegate {
     // transition is where the surface handoff is either right or wrong.
     if UserDefaults.standard.bool(forKey: "immichShellSlowAnimations") {
       window.layer.speed = 0.15
-      NSLog("[shell] animations slowed to 15%%")
+      shellLog("[shell] animations slowed to 15%%")
     }
 
-    NSLog("[shell] scene connected")
+    shellLog("[shell] scene connected")
   }
 }

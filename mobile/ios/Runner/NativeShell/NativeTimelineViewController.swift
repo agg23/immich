@@ -27,8 +27,8 @@ final class NativeTimelineViewController: UIViewController {
     static let headerHeight: CGFloat = 44
   }
 
-  init(messenger: FlutterBinaryMessenger) {
-    source = ImmichTimelineSource(messenger: messenger)
+  init(source: ImmichTimelineSource) {
+    self.source = source
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -69,14 +69,17 @@ final class NativeTimelineViewController: UIViewController {
     // reacts too rather than only the navigation bar.
     setContentScrollView(collectionView, for: [.top, .bottom])
 
-    source.onBucketsChanged = { [weak self] in
-      self?.collectionView.reloadData()
-    }
-    source.onPageLoaded = { [weak self] page in
-      self?.reloadVisible(in: page)
-      self?.openRequestedAsset()
-      self?.runHDRProbeIfRequested()
-    }
+    source.addObserver(
+      self,
+      bucketsChanged: { [weak self] in
+        self?.collectionView.reloadData()
+      },
+      pageLoaded: { [weak self] page in
+        self?.reloadVisible(in: page)
+        self?.openRequestedAsset()
+        self?.runHDRProbeIfRequested()
+      }
+    )
     source.open()
   }
 
@@ -110,7 +113,7 @@ final class NativeTimelineViewController: UIViewController {
       let ext = (asset.name as NSString).pathExtension.lowercased()
       extensions[ext, default: 0] += 1
     }
-    NSLog("[shell:probe] scanned %d: %@", scanned.count, extensions.sorted { $0.value > $1.value }
+    shellLog("[shell:probe] scanned %d: %@", scanned.count, extensions.sorted { $0.value > $1.value }
       .map { "\($0.key)=\($0.value)" }.joined(separator: " "))
 
     // A camera original is the only thing that can carry a gain map, and on an
@@ -120,7 +123,7 @@ final class NativeTimelineViewController: UIViewController {
     let candidates = cameraish.isEmpty
       ? scanned.filter { !$0.name.contains("_preview") && !$0.name.contains("_thumbnail") }
       : cameraish
-    NSLog("[shell:probe] %d candidates (%@)", candidates.count, cameraish.isEmpty ? "fallback" : "heic")
+    shellLog("[shell:probe] %d candidates (%@)", candidates.count, cameraish.isEmpty ? "fallback" : "heic")
     ThumbnailLoader.shared.probeHDR(Array(candidates.prefix(4)))
   }
 
@@ -152,7 +155,7 @@ final class NativeTimelineViewController: UIViewController {
     // cross-fade for a reason that has nothing to do with a real tap. Two runs
     // were read as a transition bug before that was understood.
     let delay = Double(UserDefaults.standard.string(forKey: "immichShellOpenDelay") ?? "") ?? 0
-    NSLog("[shell:timeline] opening requested asset %d after %.1fs", index, delay)
+    shellLog("[shell:timeline] opening requested asset %d after %.1fs", index, delay)
     guard delay > 0 else {
       open(assetAt: index)
       return
@@ -165,7 +168,7 @@ final class NativeTimelineViewController: UIViewController {
       // flight correctly degrades to a cross-fade and proves nothing.
       self.scrollZoomItemIntoView(index)
       self.view.layoutIfNeeded()
-      NSLog("[shell:timeline] grid has %ld cells", self.collectionView.visibleCells.count)
+      shellLog("[shell:timeline] grid has %ld cells", self.collectionView.visibleCells.count)
       self.open(assetAt: index)
     }
   }
@@ -434,7 +437,7 @@ extension NativeTimelineViewController: ZoomTransitionSource {
     // miss: `view` and `collectionView` do not have to be the same width.
     let tileSize = collectionView.bounds.width / CGFloat(Metrics.columns)
     let hit = ThumbnailLoader.shared.cached(asset, size: tileSize)
-    NSLog(
+    shellLog(
       "[shell:zoom] falling back for %d at %ld/%ld (cell %@), cache %.0f: %@",
       index,
       path.section,

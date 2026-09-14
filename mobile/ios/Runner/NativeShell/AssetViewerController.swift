@@ -33,11 +33,21 @@ final class AssetViewerController: UIViewController {
   /// would also change which file was fetched, and prove less.
   private var hdrEnabled = true
 
+  /// Told when the viewer is gone for good, so whoever opened it can let go of
+  /// what it was reading. A viewer pushed from a Flutter page holds a timeline
+  /// session Dart is serving; the grid's own viewer holds session 0 and this
+  /// does nothing.
+  var onClosed: (() -> Void)?
+
   init(source: ImmichTimelineSource, startIndex: Int) {
     self.source = source
     index = startIndex
     super.init(nibName: nil, bundle: nil)
     hidesBottomBarWhenPushed = true
+  }
+
+  deinit {
+    source.removeObserver(self)
   }
 
   @available(*, unavailable)
@@ -132,7 +142,38 @@ final class AssetViewerController: UIViewController {
       }
     }
 
+    // A viewer opened from the grid has its data already. One opened from a
+    // Flutter page does not: Dart subscribes to that page's timeline when the
+    // route is intercepted, so the first buckets can land after this view is
+    // on screen. Without this the viewer would be permanently empty in exactly
+    // the case it was built for.
+    source.addObserver(
+      self,
+      bucketsChanged: { [weak self] in
+        guard let self else { return }
+        self.collectionView.reloadData()
+        self.jumpToCurrentIndex()
+        self.updateTitle()
+      },
+      pageLoaded: { [weak self] _ in
+        guard let self else { return }
+        self.collectionView.reloadItems(at: self.collectionView.indexPathsForVisibleItems)
+        self.updateTitle()
+      }
+    )
+
     updateTitle()
+  }
+
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    // `isMovingFromParent` rather than `willMove`, which is where this was
+    // first written and where the transition coordinator is still nil -- an
+    // abandoned swipe-back would have closed the session under a viewer that
+    // is still on screen.
+    guard isMovingFromParent else { return }
+    onClosed?()
+    onClosed = nil
   }
 
   /// Drag down to put the photo back in the grid.
@@ -238,7 +279,7 @@ final class AssetViewerController: UIViewController {
     let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? AssetPageCell
     // The view's own answer, not the value just written to it: if these ever
     // disagree the switch is not doing what the demo claims.
-    NSLog(
+    shellLog(
       "[shell:hdr] switch=%@ view=%ld image=%@ button=%@",
       hdrEnabled ? "on" : "off",
       cell?.viewDynamicRange ?? -1,
@@ -262,7 +303,7 @@ final class AssetViewerController: UIViewController {
     // An SDR photo would toggle to no visible effect, which would read as the
     // feature being broken. Say so instead.
     guard cell?.pageImage?.isHighDynamicRange == true else {
-      NSLog(
+      shellLog(
         "[shell:page] button disabled: index=%d cell=%@ image=%@",
         index,
         cell == nil ? "absent" : "present",
@@ -289,7 +330,13 @@ final class AssetViewerController: UIViewController {
     layout.itemSize = size
     // First layout: jump to the tapped asset without an animation, before the
     // push transition has finished, so the viewer never shows the wrong photo.
-    collectionView.setContentOffset(CGPoint(x: CGFloat(index) * size.width, y: 0), animated: false)
+    jumpToCurrentIndex()
+  }
+
+  private func jumpToCurrentIndex() {
+    let width = collectionView.bounds.width
+    guard width > 0, index < source.total else { return }
+    collectionView.setContentOffset(CGPoint(x: CGFloat(index) * width, y: 0), animated: false)
   }
 
   private func updateTitle() {
@@ -469,7 +516,7 @@ private final class AssetPageCell: UICollectionViewCell {
     imageView.image = placeholder
 
     let preview = TimelineAsset.preview(of: asset)
-    NSLog(
+    shellLog(
       "[shell:page] configure %@ w=%.0f placeholder=%@ previewURL=%@ originalURL=%@ video=%@",
       asset.name, width,
       placeholder == nil ? "none" : "yes",
@@ -529,7 +576,7 @@ private final class AssetPageCell: UICollectionViewCell {
   /// tells you which half to go and look at.
   private func reportDynamicRange() {
     guard #available(iOS 17.0, *) else { return }
-    NSLog(
+    shellLog(
       "[shell:hdr] page image=%@ view=%ld screen=%.2f",
       imageView.image?.isHighDynamicRange == true ? "hdr" : "sdr",
       imageView.imageDynamicRange.rawValue,

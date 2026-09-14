@@ -129,7 +129,7 @@ final class ThumbnailLoader {
         guard let url else { continue }
         URLSessionManager.shared.session.dataTask(with: url) { data, _, _ in
           guard let data else {
-            NSLog("[shell:probe] %@ %@ fetch failed", asset.name, label)
+            shellLog("[shell:probe] %@ %@ fetch failed", asset.name, label)
             return
           }
           var thumbConfig = UIImageReader.Configuration()
@@ -139,7 +139,7 @@ final class ThumbnailLoader {
           fullConfig.prefersHighDynamicRange = true
           let thumbed = UIImageReader(configuration: thumbConfig).image(data: data)
           let full = UIImageReader(configuration: fullConfig).image(data: data)
-          NSLog(
+          shellLog(
             "[shell:probe] %@ %@ bytes=%d thumb=%@ full=%@",
             asset.name,
             label,

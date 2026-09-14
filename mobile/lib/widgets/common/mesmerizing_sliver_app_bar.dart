@@ -1,6 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+// Prefixed because this file calls Immich's own pop extension, and auto_route
+// ships one of its own that would be ambiguous with it. Only RouteData is
+// wanted here.
+import 'package:auto_route/auto_route.dart' as auto_route;
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
@@ -9,6 +13,7 @@ import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_shell.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
@@ -24,6 +29,32 @@ class MesmerizingSliverAppBar extends ConsumerStatefulWidget {
 
 class _MesmerizingSliverAppBarState extends ConsumerState<MesmerizingSliverAppBar> {
   double _scrollProgress = 0.0;
+  String? _route;
+
+  /// This header is the page, not its chrome, so the native bar floats over
+  /// it rather than replacing it. Same arrangement as the album header: the
+  /// bar carries the title and the back chevron, the cover photo keeps the
+  /// screen. Before this, these pages simply lost their photo.
+  bool get _hero => NativeShell.isActive;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route ??= auto_route.RouteData.of(context).name;
+    final route = _route;
+    if (_hero && route != null) {
+      NativeShell.publishBar(route, title: widget.title, actions: const [], hero: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    final route = _route;
+    if (route != null) {
+      NativeShell.clearBar(route);
+    }
+    super.dispose();
+  }
 
   double _calculateScrollProgress(FlexibleSpaceBarSettings? settings) {
     if (settings?.maxExtent == null || settings?.minExtent == null) {
@@ -55,7 +86,10 @@ class _MesmerizingSliverAppBarState extends ConsumerState<MesmerizingSliverAppBa
             pinned: true,
             snap: false,
             elevation: 0,
-            leading: IconButton(
+            automaticallyImplyLeading: !_hero,
+            leading: _hero
+                ? const SizedBox.shrink()
+                : IconButton(
               icon: Icon(
                 Platform.isIOS ? Icons.arrow_back_ios_new_rounded : Icons.arrow_back,
                 color: Color.lerp(Colors.white, context.primaryColor, _scrollProgress),
@@ -66,7 +100,9 @@ class _MesmerizingSliverAppBarState extends ConsumerState<MesmerizingSliverAppBa
                 ],
               ),
               onPressed: () {
-                context.pop();
+                // Immich's own, named explicitly: auto_route is imported here for
+                // RouteData and ships a competing pop.
+                ContextHelper(context).pop();
               },
             ),
             flexibleSpace: Builder(
@@ -76,7 +112,16 @@ class _MesmerizingSliverAppBarState extends ConsumerState<MesmerizingSliverAppBa
 
                 // Update scroll progress for the leading button
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted && _scrollProgress != scrollProgress) {
+                  if (!mounted) {
+                    return;
+                  }
+                  final route = _route;
+                  // The point the title used to fade in is the point the native
+                  // bar takes it over.
+                  if (_hero && route != null) {
+                    NativeShell.setBarCollapsed(route, collapsed: scrollProgress > 0.95);
+                  }
+                  if (_scrollProgress != scrollProgress) {
                     setState(() {
                       _scrollProgress = scrollProgress;
                     });
@@ -87,7 +132,7 @@ class _MesmerizingSliverAppBarState extends ConsumerState<MesmerizingSliverAppBa
                   centerTitle: true,
                   title: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 200),
-                    child: scrollProgress > 0.95
+                    child: !_hero && scrollProgress > 0.95
                         ? Text(
                             widget.title,
                             style: TextStyle(color: context.primaryColor, fontWeight: FontWeight.w600, fontSize: 18),

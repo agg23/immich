@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/pages/common/download_panel.dart';
 import 'package:immich_mobile/providers/asset_viewer/download.provider.dart';
 
@@ -21,7 +22,7 @@ class DownloadInfoPage extends ConsumerWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text(context.t.download), actions: const []),
+      appBar: NativeAppBar(title: Text(context.t.download), actions: const []),
       body: ListView.builder(
         physics: const ClampingScrollPhysics(),
         shrinkWrap: true,

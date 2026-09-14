@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
+import 'package:immich_mobile/native_shell/native_sliver_app_bar.dart';
 import 'package:immich_mobile/presentation/widgets/bottom_sheet/partner_detail_bottom_sheet.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.widget.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
@@ -10,7 +11,6 @@ import 'package:immich_mobile/providers/infrastructure/user.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/utils/debug_print.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
-import 'package:immich_mobile/widgets/common/mesmerizing_sliver_app_bar.dart';
 
 @RoutePage()
 class PartnerDetailPage extends StatelessWidget {
@@ -29,7 +29,7 @@ class PartnerDetailPage extends StatelessWidget {
         }),
       ],
       child: Timeline(
-        appBar: MesmerizingSliverAppBar(title: partner.name, icon: Icons.person_outline),
+        appBar: NativeSliverAppBar(title: partner.name, icon: Icons.person_outline),
         topSliverWidget: _InfoBox(partner: partner),
         topSliverWidgetHeight: 110,
         bottomSheet: const PartnerDetailBottomSheet(),

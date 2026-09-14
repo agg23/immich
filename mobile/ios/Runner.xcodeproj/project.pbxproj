@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -152,6 +152,13 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		ADA0BEEF2F00000100000001 /* NativeShell */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			path = NativeShell;
+			sourceTree = "<group>";
+		};
 		B231F52D2E93A44A00BC45D1 /* Core */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -180,13 +187,6 @@
 				FE1BB4572F83196E0087DBF9 /* Exceptions for "Utility" folder in "Runner" target */,
 			);
 			path = Utility;
-			sourceTree = "<group>";
-		};
-		ADA0BEEF2F00000100000001 /* NativeShell */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
-			path = NativeShell;
 			sourceTree = "<group>";
 		};
 		FEE084F22EC172080045228E /* Schemas */ = {
@@ -394,10 +394,10 @@
 				F0B57D482DF764BE00DC5BCC /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
+				ADA0BEEF2F00000100000001 /* NativeShell */,
 				B231F52D2E93A44A00BC45D1 /* Core */,
 				B2CF7F8C2DDE4EBB00744BF6 /* Sync */,
 				FEE084F22EC172080045228E /* Schemas */,
-				ADA0BEEF2F00000100000001 /* NativeShell */,
 			);
 			name = Runner;
 			packageProductDependencies = (

@@ -4,6 +4,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/theme_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_shell.dart';
 import 'package:immich_mobile/pages/common/large_leading_tile.dart';
 import 'package:immich_mobile/presentation/widgets/images/local_album_thumbnail.widget.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
@@ -16,7 +17,20 @@ class LocalAlbumsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(body: CustomScrollView(slivers: [LocalAlbumsSliverAppBar(), _AlbumList()]));
+    // A sliver list rather than a `Scaffold.appBar`, so the header is dropped
+    // from the slivers instead of nulled — and the padding it was providing has
+    // to be put back. `Timeline` does this for itself; a bare CustomScrollView
+    // has nothing else consuming the top inset, so the list would start under
+    // the native navigation bar.
+    final suppressed = NativeShell.suppressesAppBar('LocalAlbumsRoute');
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          if (!suppressed) const LocalAlbumsSliverAppBar(),
+          SliverSafeArea(top: suppressed, bottom: false, sliver: const _AlbumList()),
+        ],
+      ),
+    );
   }
 }
 

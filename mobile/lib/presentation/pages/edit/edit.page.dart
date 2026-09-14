@@ -10,6 +10,7 @@ import 'package:immich_mobile/constants/aspect_ratios.dart';
 import 'package:immich_mobile/domain/models/asset_edit.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/presentation/pages/edit/editor.provider.dart';
 import 'package:immich_mobile/providers/theme.provider.dart';
 import 'package:immich_mobile/theme/theme_data.dart';
@@ -115,7 +116,7 @@ class _EditImagePageState extends ConsumerState<EditImagePage> with TickerProvid
       child: Theme(
         data: getThemeData(colorScheme: ref.watch(immichThemeProvider).dark, locale: context.locale),
         child: Scaffold(
-          appBar: AppBar(
+          appBar: NativeAppBar(
             backgroundColor: Colors.black,
             title: Text(context.t.edit),
             leading: ImmichCloseButton(onPressed: () => Navigator.of(context).maybePop()),

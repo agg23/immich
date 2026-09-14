@@ -15,6 +15,7 @@ import 'package:immich_mobile/models/folder/recursive_folder.model.dart';
 import 'package:immich_mobile/models/shared_link/shared_link.model.dart';
 import 'package:immich_mobile/models/upload/share_intent_attachment.model.dart';
 import 'package:immich_mobile/native_shell/native_shell.dart';
+import 'package:immich_mobile/native_shell/native_timeline_bridge.dart';
 import 'package:immich_mobile/pages/backup/backup.page.dart';
 import 'package:immich_mobile/pages/backup/backup_album_selection.page.dart';
 import 'package:immich_mobile/pages/backup/backup_asset_detail.page.dart';
@@ -77,6 +78,7 @@ import 'package:immich_mobile/providers/api.provider.dart';
 import 'package:immich_mobile/routing/auth_guard.dart';
 import 'package:immich_mobile/routing/duplicate_guard.dart';
 import 'package:immich_mobile/routing/locked_guard.dart';
+import 'package:immich_mobile/routing/native_viewer_guard.dart';
 import 'package:immich_mobile/services/api.service.dart';
 import 'package:immich_mobile/services/auth.service.dart';
 import 'package:immich_mobile/services/local_auth.service.dart';
@@ -92,6 +94,7 @@ final appRouterProvider = Provider(
     ref.watch(authServiceProvider),
     ref.watch(secureStorageServiceProvider),
     ref.watch(localAuthServiceProvider),
+    ref.watch(nativeTimelineBridgeProvider),
   ),
 );
 
@@ -100,16 +103,19 @@ class AppRouter extends RootStackRouter {
   late final AuthGuard _authGuard;
   late final DuplicateGuard _duplicateGuard;
   late final LockedGuard _lockedGuard;
+  late final NativeViewerGuard _nativeViewerGuard;
 
   AppRouter(
     ApiService apiService,
     AuthService authService,
     SecureStorageService secureStorageService,
     LocalAuthService localAuthService,
+    NativeTimelineBridge timelineBridge,
   ) {
     _authGuard = AuthGuard(apiService, authService);
     _duplicateGuard = const DuplicateGuard();
     _lockedGuard = LockedGuard(apiService, secureStorageService, localAuthService);
+    _nativeViewerGuard = NativeViewerGuard(timelineBridge);
   }
 
   @override
@@ -150,7 +156,10 @@ class AppRouter extends RootStackRouter {
     AutoRoute(page: RemoteAlbumRoute.page, guards: [_authGuard]),
     AutoRoute(
       page: AssetViewerRoute.page,
-      guards: [_authGuard, _duplicateGuard],
+      // [_nativeViewerGuard] last: it declines the route outright under the
+      // shell, and the two before it are what decide whether opening a viewer
+      // is allowed at all.
+      guards: [_authGuard, _duplicateGuard, _nativeViewerGuard],
       type: RouteType.custom(
         customRouteBuilder: <T>(context, child, page) => PageRouteBuilder<T>(
           fullscreenDialog: page.fullscreenDialog,

@@ -6,6 +6,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/models/upload/share_intent_attachment.model.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/pages/common/large_leading_tile.dart';
 import 'package:immich_mobile/providers/asset_viewer/share_intent_upload.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
@@ -55,7 +56,7 @@ class ShareIntentPage extends ConsumerWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: NativeAppBar(
         title: Column(
           children: [
             Text(context.t.upload_to_immich(count: candidates.length)),

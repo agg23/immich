@@ -8,6 +8,7 @@ import 'package:immich_mobile/domain/services/sync_linked_album.service.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
 import 'package:immich_mobile/providers/backup/backup_album.provider.dart';
@@ -146,7 +147,7 @@ class _BackupAlbumSelectionPageState extends ConsumerState<BackupAlbumSelectionP
         }
       },
       child: Scaffold(
-        appBar: AppBar(
+        appBar: NativeAppBar(
           leading: IconButton(
             onPressed: () async => await context.maybePop(),
             icon: const Icon(Icons.arrow_back_ios_rounded),

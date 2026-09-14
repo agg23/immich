@@ -44,6 +44,14 @@ final class ImmichTimelineSource {
     let offset: Int
   }
 
+  /// Which of Dart's timelines this is.
+  ///
+  /// Immich's timeline is not one query. The grid shows the main timeline, but
+  /// a viewer opened from an album, a person or a search is looking at a
+  /// different `TimelineService` with its own buckets and its own flat indices.
+  /// Dart numbers those; a source is one session's view of one of them.
+  let session: Int
+
   private(set) var buckets: [Bucket] = []
   private(set) var total = 0
 
@@ -51,21 +59,43 @@ final class ImmichTimelineSource {
   /// array so a reload can drop everything without resizing anything.
   private var pages: [Int: [TimelineAsset]] = [:]
   private var inFlight: Set<Int> = []
+  /// How many times a page has come back short. See [request].
+  private var retries: [Int: Int] = [:]
   private static let pageSize = 120
+  private static let maxRetries = 12
+  private static let retryDelay = 0.25
 
   private let channel: FlutterMethodChannel
-  /// Called when the set of sections changes, or when a page lands.
-  var onBucketsChanged: (() -> Void)?
-  var onPageLoaded: ((Int) -> Void)?
 
-  init(messenger: FlutterBinaryMessenger) {
-    channel = FlutterMethodChannel(name: "immich/timeline", binaryMessenger: messenger)
-    channel.setMethodCallHandler { [weak self] call, result in
-      if call.method == "invalidate", let args = call.arguments as? [String: Any] {
-        self?.apply(args)
-      }
-      result(nil)
-    }
+  /// Who wants to hear about it. Two single closures would have been enough
+  /// while the grid was the only consumer, and stopped being enough the moment
+  /// a viewer could share the main timeline with it -- the second assignment
+  /// silently unsubscribed the first.
+  private struct Observer {
+    let bucketsChanged: () -> Void
+    let pageLoaded: (Int) -> Void
+  }
+
+  private var observers: [(id: ObjectIdentifier, observer: Observer)] = []
+
+  init(session: Int, channel: FlutterMethodChannel) {
+    self.session = session
+    self.channel = channel
+  }
+
+  func addObserver(
+    _ owner: AnyObject,
+    bucketsChanged: @escaping () -> Void,
+    pageLoaded: @escaping (Int) -> Void
+  ) {
+    let id = ObjectIdentifier(owner)
+    observers.removeAll { $0.id == id }
+    observers.append((id, Observer(bucketsChanged: bucketsChanged, pageLoaded: pageLoaded)))
+  }
+
+  func removeObserver(_ owner: AnyObject) {
+    let id = ObjectIdentifier(owner)
+    observers.removeAll { $0.id == id }
   }
 
   /// Tell Dart the grid is ready. The state comes back as an `invalidate`,
@@ -73,10 +103,12 @@ final class ImmichTimelineSource {
   /// when the call was made, which on a cold start is before the first bucket
   /// query has finished.
   func open() {
-    channel.invokeMethod("open", arguments: nil)
+    channel.invokeMethod("open", arguments: ["session": session])
   }
 
-  private func apply(_ args: [String: Any]) {
+  /// Called by [TimelineSessions], which owns the channel and routes each
+  /// `invalidate` to the session it names.
+  func apply(_ args: [String: Any]) {
     let raw = args["buckets"] as? [[String: Any]] ?? []
     var offset = 0
     var next: [Bucket] = []
@@ -94,8 +126,9 @@ final class ImmichTimelineSource {
     // would show the wrong photo under the right date.
     pages = [:]
     inFlight = []
-    NSLog("[shell:timeline] buckets=%d total=%d", buckets.count, total)
-    onBucketsChanged?()
+    retries = [:]
+    shellLog("[shell:timeline] session=%d buckets=%d total=%d", session, buckets.count, total)
+    for entry in observers { entry.observer.bucketsChanged() }
   }
 
   /// The asset at a flat index, if its page is already loaded. Requests the
@@ -131,7 +164,10 @@ final class ImmichTimelineSource {
     let index = page * Self.pageSize
     let started = CFAbsoluteTimeGetCurrent()
     let expected = min(Self.pageSize, total - index)
-    channel.invokeMethod("assets", arguments: ["index": index, "count": Self.pageSize]) { [weak self] response in
+    channel.invokeMethod(
+      "assets",
+      arguments: ["session": session, "index": index, "count": Self.pageSize]
+    ) { [weak self] response in
       guard let self else { return }
       self.inFlight.remove(page)
       guard let raw = response as? [[String: Any]] else { return }
@@ -140,13 +176,28 @@ final class ImmichTimelineSource {
       // bucket counts before its asset buffer has caught up, so a request made
       // in that window comes back empty — and caching that as a loaded page
       // leaves those tiles permanently blank, because nothing ever asks again.
+      //
+      // "Nothing ever asks again" is the whole problem, and this used to say
+      // "will retry" without retrying: the grid got away with it because
+      // scrolling re-asks, and a viewer pushed straight onto a timeline that
+      // has just been created does not scroll and stayed blank forever.
       guard raw.count >= expected else {
-        NSLog("[shell:timeline] page=%d short (%d of %d) in %.1fms, will retry", page, raw.count, expected, ms)
+        let attempt = (self.retries[page] ?? 0) + 1
+        self.retries[page] = attempt
+        shellLog(
+          "[shell:timeline] session=%d page=%d short (%d of %d) in %.1fms, retry %d",
+          self.session, page, raw.count, expected, ms, attempt
+        )
+        guard attempt <= Self.maxRetries else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.retryDelay) { [weak self] in
+          self?.request(page: page)
+        }
         return
       }
+      self.retries[page] = nil
       self.pages[page] = raw.compactMap(TimelineAsset.init)
-      NSLog("[shell:timeline] page=%d assets=%d in %.1fms", page, raw.count, ms)
-      self.onPageLoaded?(page)
+      shellLog("[shell:timeline] session=%d page=%d assets=%d in %.1fms", self.session, page, raw.count, ms)
+      for entry in self.observers { entry.observer.pageLoaded(page) }
     }
   }
 

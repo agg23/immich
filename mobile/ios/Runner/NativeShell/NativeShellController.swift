@@ -41,9 +41,12 @@ final class NativeShellController: UITabBarController, UITabBarControllerDelegat
     super.viewDidLoad()
 
     viewControllers = Tab.allCases.enumerated().map { index, tab in
-      let root: UIViewController = tab == .photos
-        ? NativeTimelineViewController(messenger: ShellEngine.shared.engine.binaryMessenger)
-        : FlutterTabController(route: tab.rawValue, label: tab.title)
+      let root: UIViewController
+      if tab == .photos, let main = TimelineSessions.shared.source(for: TimelineSessions.mainSession) {
+        root = NativeTimelineViewController(source: main)
+      } else {
+        root = FlutterTabController(route: tab.rawValue, label: tab.title)
+      }
 
       // Every tab gets a navigation controller, including the Flutter ones:
       // that is the stack a Dart push is mirrored into. The Flutter tab roots
@@ -67,7 +70,7 @@ final class NativeShellController: UITabBarController, UITabBarControllerDelegat
     if let name = UserDefaults.standard.string(forKey: "immichShellTab"),
        let index = Tab.allCases.firstIndex(where: { $0.rawValue == name }) {
       selectedIndex = index
-      NSLog("[shell] initial tab=%@", name)
+      shellLog("[shell] initial tab=%@", name)
     }
 
     // `-immichShellRetap <seconds>` taps the selected tab again. It goes
@@ -76,7 +79,7 @@ final class NativeShellController: UITabBarController, UITabBarControllerDelegat
     if let delay = UserDefaults.standard.string(forKey: "immichShellRetap"), let seconds = Double(delay) {
       DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
         guard let self, let selected = self.selectedViewController else { return }
-        NSLog("[shell] debug: re-tapping the selected tab")
+        shellLog("[shell] debug: re-tapping the selected tab")
         _ = self.tabBarController(self, shouldSelect: selected)
       }
     }
@@ -91,7 +94,7 @@ final class NativeShellController: UITabBarController, UITabBarControllerDelegat
       for (step, name) in names.split(separator: ",").enumerated() {
         guard let index = Tab.allCases.firstIndex(where: { $0.rawValue == name }) else { continue }
         DispatchQueue.main.asyncAfter(deadline: .now() + 6 + Double(step) * 4) { [weak self] in
-          NSLog("[shell] debug: switching to tab=%@", String(name))
+          shellLog("[shell] debug: switching to tab=%@", String(name))
           self?.selectedIndex = index
           self?.announceSelectedTab()
         }
@@ -152,7 +155,7 @@ final class NativeShellController: UITabBarController, UITabBarControllerDelegat
   func announceSelectedTab() {
     guard selectedIndex >= 0, selectedIndex < Tab.allCases.count else { return }
     let tab = Tab.allCases[selectedIndex]
-    NSLog("[shell] tab bar selected %@", tab.rawValue)
+    shellLog("[shell] tab bar selected %@", tab.rawValue)
     ShellBridge.shared.show(route: tab.rawValue) { surface in
       ShellEngine.shared.dartIsShowing(surface)
     }
