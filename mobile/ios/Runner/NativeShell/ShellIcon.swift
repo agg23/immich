@@ -22,6 +22,10 @@ enum ShellIcon: String {
   case removeUser
   case restore
   case search
+  case searchDescription
+  case searchFilename
+  case searchOcr
+  case searchSmart
   case settings
   case slideshow
   case sort
@@ -48,6 +52,10 @@ enum ShellIcon: String {
     case .removeUser: "person.badge.minus"
     case .restore: "arrow.uturn.backward"
     case .search: "magnifyingglass"
+    case .searchDescription: "text.alignleft"
+    case .searchFilename: "textformat.abc"
+    case .searchOcr: "doc.viewfinder"
+    case .searchSmart: "sparkle.magnifyingglass"
     case .settings: "gearshape"
     case .slideshow: "play.rectangle"
     case .sort: "arrow.up.arrow.down"

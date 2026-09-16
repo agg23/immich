@@ -28,8 +28,18 @@ void main() {
 
     test('describes itself with everything the native tab bar needs', () {
       for (final tab in NativeTab.values) {
-        expect(tab.describe(), {'id': tab.id, 'label': tab.label, 'icon': tab.icon.name});
+        expect(tab.describe(), {
+          'id': tab.id,
+          'label': tab.label,
+          'icon': tab.icon.name,
+          if (tab.isSearch) 'role': 'search',
+        });
       }
+    });
+
+    test('exactly one tab claims the search role', () {
+      // iOS 26 gives the search tab its own section; two would be ambiguous.
+      expect(NativeTab.values.where((t) => t.isSearch), hasLength(1));
     });
   });
 

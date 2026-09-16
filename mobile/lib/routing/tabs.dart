@@ -34,7 +34,10 @@ enum NativeTab {
   };
 
   /// Search rebuilds its query state on every visit.
-  bool get maintainRootState => this != NativeTab.search;
+  bool get maintainRootState => !isSearch;
+
+  /// Platforms that give search its own affordance need to be told which tab it is.
+  bool get isSearch => this == NativeTab.search;
 
   NativeIcon get icon => switch (this) {
     NativeTab.photos => NativeIcon.photos,
@@ -51,7 +54,7 @@ enum NativeTab {
     NativeTab.library => StaticTranslations.instance.library$,
   };
 
-  Map<String, Object?> describe() => {'id': id, 'label': label, 'icon': icon.name};
+  Map<String, Object?> describe() => {'id': id, 'label': label, 'icon': icon.name, if (isSearch) 'role': 'search'};
 
   static NativeTab? byId(String? id) => id == null ? null : values.asNameMap()[id];
 

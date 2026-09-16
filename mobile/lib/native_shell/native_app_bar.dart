@@ -33,7 +33,8 @@ class NativeAppBar extends StatefulWidget implements PreferredSizeWidget {
   static String? _textOf(Widget? widget) => widget is Text ? widget.data : null;
 
   ({String title, List<NativeBarAction> actions})? _translate() {
-    final text = _textOf(title);
+    // No title is a title: a search tab's bar holds only actions.
+    final text = title == null ? '' : _textOf(title);
     if (text == null || bottom != null) {
       return null;
     }
@@ -44,7 +45,7 @@ class NativeAppBar extends StatefulWidget implements PreferredSizeWidget {
   bool get _suppressed => NativeShell.isActive && _translate() != null;
 
   String _untranslatable() {
-    if (_textOf(title) == null) {
+    if (title != null && _textOf(title) == null) {
       return 'title is ${title.runtimeType}';
     }
     if (bottom != null) {

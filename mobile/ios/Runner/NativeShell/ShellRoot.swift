@@ -1,14 +1,18 @@
 import AuthenticationServices
 import UIKit
 
-final class ShellRootController: UIViewController {
-  private var current: UIViewController?
+/// Swaps the window's root between the launch surface and the shell.
+///
+/// Not a container view controller: `UITabBarController` is only supported as a
+/// window's root, and nested as a child it loses the iOS 26 tab bar treatment —
+/// the search tab stays in the group instead of standing apart.
+final class ShellRoot {
+  private weak var window: UIWindow?
 
-  var currentChild: UIViewController? { current }
+  private(set) var current: UIViewController?
 
-  override func viewDidLoad() {
-    super.viewDidLoad()
-    view.backgroundColor = .systemBackground
+  init(window: UIWindow) {
+    self.window = window
     ShellBridge.shared.onAuthStateChange = { [weak self] state in
       DispatchQueue.main.async { self?.apply(state) }
     }
@@ -30,21 +34,8 @@ final class ShellRootController: UIViewController {
     }
     if let current, type(of: current) == type(of: next) { return }
     shellLog("[shell] root -> %@", String(describing: type(of: next)))
-    swap(to: next)
-  }
-
-  private func swap(to next: UIViewController) {
-    if let current {
-      current.willMove(toParent: nil)
-      current.view.removeFromSuperview()
-      current.removeFromParent()
-    }
-    addChild(next)
-    next.view.frame = view.bounds
-    next.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    view.addSubview(next.view)
-    next.didMove(toParent: self)
     current = next
+    window?.rootViewController = next
     // Dart's stack predates this one, so its first `sync` was dropped.
     if next is UITabBarController {
       ShellBridge.shared.requestSync()
@@ -53,12 +44,15 @@ final class ShellRootController: UIViewController {
 }
 
 /// `flutter_web_auth_2` presents from `window.rootViewController`, and only declares
-/// this conformance on `FlutterViewController` — which is a grandchild here, not the
-/// root. Without it, OAuth fails with ACQUIRE_ROOT_VIEW_CONTROLLER_FAILED.
-extension ShellRootController: ASWebAuthenticationPresentationContextProviding {
+/// this conformance on `FlutterViewController`, which is never the root here.
+extension NativeShellController: ASWebAuthenticationPresentationContextProviding {
   func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-    view.window ?? UIApplication.shared.connectedScenes
-      .compactMap { ($0 as? UIWindowScene)?.keyWindow }
-      .first ?? ASPresentationAnchor()
+    view.window ?? ASPresentationAnchor()
+  }
+}
+
+extension FlutterTabController: ASWebAuthenticationPresentationContextProviding {
+  func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+    view.window ?? ASPresentationAnchor()
   }
 }

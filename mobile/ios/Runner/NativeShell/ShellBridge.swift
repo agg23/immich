@@ -16,6 +16,10 @@ final class ShellBridge {
   /// Declared by Dart: order is identity across the channel, and labels are localised.
   private(set) var tabs: [ShellTab] = []
 
+  private(set) var searchPlaceholder: String?
+  var onSearchPlaceholderChange: ((String?) -> Void)?
+  var onSearchTextChange: ((String) -> Void)?
+
   var channel: FlutterMethodChannel?
   private var dartIsReady = false
 
@@ -62,6 +66,14 @@ final class ShellBridge {
       )
     case "log":
       shellLog("[shell:dart] %@", args["text"] as? String ?? "?")
+    case "search":
+      if let placeholder = args["placeholder"] as? String {
+        searchPlaceholder = placeholder
+        onSearchPlaceholderChange?(placeholder)
+      }
+      if let text = args["text"] as? String {
+        onSearchTextChange?(text)
+      }
     case "barCollapsed":
       let route = args["route"] as? String ?? ""
       let collapsed = args["collapsed"] as? Bool ?? false
@@ -79,6 +91,7 @@ final class ShellBridge {
       if args["claimTab"] as? Bool ?? false {
         selectIfNeeded(tab: tab)
       }
+      applyTabBars(args["tabBars"] as? [String: [String: Any]] ?? [:])
       reconcile(to: routes, tab: tab)
       ShellEngine.shared.dartIsShowing(
         args["surface"] as? String ?? "",
@@ -105,33 +118,36 @@ final class ShellBridge {
   }
 
 
-  private var tabBarController: UITabBarController? {
+  /// Setting `UITabBarController.tabs` retires `viewControllers` and `selectedIndex`,
+  /// so every lookup goes through the shell rather than the tab bar itself.
+  private var shell: NativeShellController? {
     let root = UIApplication.shared.connectedScenes
       .compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }
       .first
-    return (root as? ShellRootController)?.currentChild as? UITabBarController
+    return root as? NativeShellController
   }
 
-  var activeNavigationController: UINavigationController? {
-    tabBarController?.selectedViewController as? UINavigationController
-  }
+  var activeNavigationController: UINavigationController? { shell?.activeNavigationController }
 
   private func selectIfNeeded(tab: String) {
-    guard let shell = tabBarController,
-          let index = tabs.firstIndex(where: { $0.id == tab }),
-          index < (shell.viewControllers?.count ?? 0),
-          shell.selectedIndex != index else { return }
+    guard let shell, shell.selectedTabId != tab else { return }
     shellLog("[shell:nav] dart moved to %@", tab)
-    shell.selectedIndex = index
+    shell.select(tabId: tab)
+  }
+
+  /// A tab's root is not a stack frame, so its bar arrives separately.
+  private func applyTabBars(_ bars: [String: [String: Any]]) {
+    for (tab, bar) in bars {
+      guard let host = navigationController(forTab: tab)?.viewControllers.first as? FlutterTabController else {
+        continue
+      }
+      host.barRoute = bar["name"] as? String ?? tab
+      host.apply(title: bar["title"] as? String, actions: bar["actions"] as? [[String: Any]] ?? [])
+    }
   }
 
   private func navigationController(forTab tab: String) -> UINavigationController? {
-    guard let shell = tabBarController else { return nil }
-    guard let index = tabs.firstIndex(where: { $0.id == tab }),
-          let controllers = shell.viewControllers, index < controllers.count else {
-      return activeNavigationController
-    }
-    return controllers[index] as? UINavigationController
+    shell?.navigationController(forTab: tab)
   }
 
   private func frame(named route: String) -> FlutterStackController? {
@@ -216,6 +232,11 @@ final class ShellBridge {
 
   func barAction(route: String, index: Int, item: Int) {
     channel?.invokeMethod("barAction", arguments: ["route": route, "index": index, "item": item])
+  }
+
+  func submitSearch(_ text: String) {
+    shellLog("[shell] search submit %@", text.isEmpty ? "(cleared)" : text)
+    channel?.invokeMethod("searchSubmitted", arguments: ["text": text])
   }
 
   func popToRoot(tab: String) {

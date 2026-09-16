@@ -145,25 +145,26 @@ extension ShellBridge {
 
 extension NativeShellController {
   func scheduleDebugTabHooks() {
-    if let name = UserDefaults.standard.string(forKey: "immichShellTab"), let index = index(ofTab: name) {
-      selectedIndex = index
+    if let name = UserDefaults.standard.string(forKey: "immichShellTab"), index(ofTab: name) != nil {
+      select(tabId: name)
       shellLog("[shell] initial tab=%@", name)
     }
 
     if let delay = UserDefaults.standard.string(forKey: "immichShellRetap"), let seconds = Double(delay) {
       DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-        guard let self, let selected = self.selectedViewController else { return }
+        guard let self, let id = self.selectedTabId else { return }
         shellLog("[shell] debug: re-tapping the selected tab")
-        _ = self.tabBarController(self, shouldSelect: selected)
+        self.reselect(tabId: id)
       }
     }
 
     guard let names = UserDefaults.standard.string(forKey: "immichShellSwitchTo") else { return }
     for (step, name) in names.split(separator: ",").enumerated() {
-      guard let index = index(ofTab: String(name)) else { continue }
+      let id = String(name)
+      guard index(ofTab: id) != nil else { continue }
       DispatchQueue.main.asyncAfter(deadline: .now() + 6 + Double(step) * 4) { [weak self] in
-        shellLog("[shell] debug: switching to tab=%@", String(name))
-        self?.selectedIndex = index
+        shellLog("[shell] debug: switching to tab=%@", id)
+        self?.select(tabId: id)
         self?.announceSelectedTab()
       }
     }

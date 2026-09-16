@@ -10,11 +10,18 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:immich_mobile/native_shell/native_bar_registry.dart';
 import 'package:immich_mobile/native_shell/native_icon.dart';
+import 'package:immich_mobile/native_shell/native_search.dart';
 import 'package:immich_mobile/native_shell/native_shell_debug.dart';
 import 'package:immich_mobile/routing/tabs.dart';
 
 class NativeMenuItem {
-  const NativeMenuItem({required this.label, this.icon, this.onPressed, this.destructive = false});
+  const NativeMenuItem({
+    required this.label,
+    this.icon,
+    this.onPressed,
+    this.destructive = false,
+    this.selected = false,
+  });
 
   final String label;
 
@@ -23,11 +30,15 @@ class NativeMenuItem {
   final VoidCallback? onPressed;
   final bool destructive;
 
+  /// A checkmark: the rows of a radio group are all still tappable.
+  final bool selected;
+
   Map<String, Object?> describe() => {
     'label': label,
     if (icon != null) 'icon': icon!.name,
     'enabled': onPressed != null,
     if (destructive) 'destructive': true,
+    if (selected) 'selected': true,
   };
 
   // `onPressed` is a fresh closure every build, so equality ignores it.
@@ -37,10 +48,11 @@ class NativeMenuItem {
       other.label == label &&
       other.icon == icon &&
       other.destructive == destructive &&
+      other.selected == selected &&
       (other.onPressed == null) == (onPressed == null);
 
   @override
-  int get hashCode => Object.hash(label, icon, destructive, onPressed == null);
+  int get hashCode => Object.hash(label, icon, destructive, selected, onPressed == null);
 }
 
 class NativeBarAction {
@@ -194,6 +206,13 @@ class NativeShell {
     ];
   }
 
+  /// A tab's root is drawn by the native tab, not as a stack frame, so it is absent
+  /// from [_mirroredStack] — but it can still publish a bar.
+  static Map<String, Object?> _tabBars() => {
+    for (final tab in NativeTab.values)
+      if (_bars[tab.rootPage.name] case final bar?) tab.id: bar.describe(tab.rootPage.name),
+  };
+
   /// An `opaque: false` layer given a native frame plays both transitions at once.
   static final _overlayRoutes = <String>{};
 
@@ -217,6 +236,13 @@ class NativeShell {
   static void clearBar(String route) => _bars.clear(route);
 
   static void logFallback(String route, String reason) => log('bar fallback $route: $reason');
+
+  static void sendSearch({String? placeholder, String? text}) {
+    if (!isActive) {
+      return;
+    }
+    unawaited(_channel.invokeMethod('search', {'placeholder': ?placeholder, 'text': ?text}));
+  }
 
   static void openViewer({required int session, required int index}) {
     unawaited(_channel.invokeMethod('openViewer', {'session': session, 'index': index}));
@@ -248,6 +274,7 @@ class NativeShell {
     final claimTab = tab.isNotEmpty && tab != _nativeTab;
     final payload = {
       'routes': _mirroredStack(),
+      'tabBars': _tabBars(),
       'surface': surface(),
       'overlay': _overlayPresent,
       'tab': tab,
@@ -385,6 +412,8 @@ class NativeShell {
         await _popFromNative(args?['name'] as String?);
       case 'show':
         return _show(args?['route'] as String?);
+      case 'searchSubmitted':
+        NativeSearch.handleSubmitted(args?['text'] as String? ?? '');
       default:
         if (!await NativeShellDebug.handle(call, router: _router, tabs: _tabsRouter)) {
           log('unhandled native call ${call.method}');

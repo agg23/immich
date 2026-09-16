@@ -4,6 +4,10 @@ import 'package:immich_mobile/native_shell/native_icon.dart';
 import 'package:immich_mobile/native_shell/native_shell.dart';
 
 NativeBarAction? translateAction(Widget widget) {
+  // Bars routinely space their actions; the padding is the native bar's own job.
+  if (widget is Padding) {
+    return translateAction(widget.child ?? const SizedBox.shrink());
+  }
   if (widget is NativeBarMenu) {
     return widget.describe();
   }
@@ -37,9 +41,12 @@ List<NativeBarAction>? translateActions(List<Widget>? actions) {
 }
 
 String? untranslatableAction(List<Widget>? actions) {
-  for (final action in actions ?? const <Widget>[]) {
+  for (var action in actions ?? const <Widget>[]) {
     if (translateAction(action) != null) {
       continue;
+    }
+    while (action is Padding && action.child != null) {
+      action = action.child!;
     }
     if (action is NativeBarMenu) {
       return action.untranslatable() ?? 'menu did not translate';

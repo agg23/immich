@@ -5,12 +5,19 @@ import 'package:immich_mobile/native_shell/native_shell.dart';
 import 'package:immich_mobile/presentation/widgets/action_buttons/base_action_button.widget.dart';
 
 class NativeBarMenuItem {
-  const NativeBarMenuItem({required this.label, required this.icon, this.onPressed, this.destructive = false});
+  const NativeBarMenuItem({
+    required this.label,
+    required this.icon,
+    this.onPressed,
+    this.destructive = false,
+    this.selected = false,
+  });
 
   final String label;
   final IconData icon;
   final VoidCallback? onPressed;
   final bool destructive;
+  final bool selected;
 }
 
 class NativeBarMenu extends StatelessWidget {
@@ -42,7 +49,13 @@ class NativeBarMenu extends StatelessWidget {
         return null;
       }
       rows.add(
-        NativeMenuItem(label: item.label, icon: token, onPressed: item.onPressed, destructive: item.destructive),
+        NativeMenuItem(
+          label: item.label,
+          icon: token,
+          onPressed: item.onPressed,
+          destructive: item.destructive,
+          selected: item.selected,
+        ),
       );
     }
     return NativeBarAction(icon: trigger, menu: rows);

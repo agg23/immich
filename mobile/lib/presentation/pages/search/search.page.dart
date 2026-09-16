@@ -14,6 +14,9 @@ import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/models/search/search_filter.model.dart';
+import 'package:immich_mobile/native_shell/native_app_bar.dart';
+import 'package:immich_mobile/native_shell/native_bar_menu.dart';
+import 'package:immich_mobile/native_shell/native_search.dart';
 import 'package:immich_mobile/presentation/pages/search/paginated_search.provider.dart';
 import 'package:immich_mobile/presentation/widgets/bottom_sheet/general_bottom_sheet.widget.dart';
 import 'package:immich_mobile/presentation/widgets/search/quick_date_picker.dart';
@@ -23,7 +26,6 @@ import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.da
 import 'package:immich_mobile/providers/search/search_input_focus.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
-import 'package:immich_mobile/widgets/common/feature_check.dart';
 import 'package:immich_mobile/widgets/common/search_field.dart';
 import 'package:immich_mobile/widgets/common/tag_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/camera_picker.dart';
@@ -109,6 +111,7 @@ class SearchPage extends HookConsumerWidget {
           }
 
           textSearchController.clear();
+          NativeSearch.setText('');
           peopleCurrentFilterWidget.value = null;
           dateRangeCurrentFilterWidget.value = null;
           cameraCurrentFilterWidget.value = null;
@@ -492,12 +495,31 @@ class SearchPage extends HookConsumerWidget {
       );
     }
 
+    // The platform owns the field when it draws one; this page keeps the type
+    // selector and the filter chips either way.
+    useEffect(() {
+      NativeSearch.setPlaceholder(searchHintText.value);
+      return null;
+    }, [searchHintText.value]);
+
     void handleTextSubmitted(String value) => search(switch (textSearchType.value) {
       TextSearchType.context => filter.value.copyWith(filename: '', context: value, description: '', ocr: ''),
       TextSearchType.filename => filter.value.copyWith(filename: value, context: '', description: '', ocr: ''),
       TextSearchType.description => filter.value.copyWith(filename: '', context: '', description: value, ocr: ''),
       TextSearchType.ocr => filter.value.copyWith(filename: '', context: '', description: '', ocr: value),
     });
+
+    useEffect(() {
+      // Deliberately no dependencies: the closure reads hook state through stable
+      // notifiers, so re-subscribing on every build would only churn.
+      final subscription = NativeSearch.submitted.listen(handleTextSubmitted);
+      return subscription.cancel;
+    }, const []);
+
+    void selectSearchType(TextSearchType type, String hint) {
+      textSearchType.value = type;
+      searchHintText.value = hint;
+    }
 
     IconData getSearchPrefixIcon() => switch (textSearchType.value) {
       TextSearchType.context => Icons.image_search_rounded,
@@ -508,141 +530,78 @@ class SearchPage extends HookConsumerWidget {
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      appBar: AppBar(
+      appBar: NativeAppBar(
         automaticallyImplyLeading: true,
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
-            child: MenuAnchor(
-              style: MenuStyle(
-                elevation: const WidgetStatePropertyAll(1),
-                shape: WidgetStateProperty.all(
-                  const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(24))),
-                ),
-                padding: const WidgetStatePropertyAll(EdgeInsets.all(4)),
-              ),
-              builder: (BuildContext context, MenuController controller, Widget? child) {
-                return IconButton(
-                  onPressed: () {
-                    if (controller.isOpen) {
-                      controller.close();
-                    } else {
-                      controller.open();
-                    }
-                  },
-                  icon: const Icon(Icons.more_vert_rounded),
-                  tooltip: context.t.show_text_search_menu,
-                );
-              },
-              menuChildren: [
-                FeatureCheck(
-                  feature: (features) => features.smartSearch,
-                  child: MenuItemButton(
-                    child: ListTile(
-                      leading: const Icon(Icons.image_search_rounded),
-                      title: Text(
-                        context.t.search_by_context,
-                        style: context.textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w500,
-                          color: textSearchType.value == TextSearchType.context ? context.colorScheme.primary : null,
-                        ),
-                      ),
-                      selectedColor: context.colorScheme.primary,
-                      selected: textSearchType.value == TextSearchType.context,
-                    ),
-                    onPressed: () {
-                      textSearchType.value = TextSearchType.context;
-                      searchHintText.value = context.t.sunrise_on_the_beach;
-                    },
+            child: NativeBarMenu(
+              icon: Icons.more_vert_rounded,
+              tooltip: context.t.show_text_search_menu,
+              items: [
+                if (serverFeatures.smartSearch)
+                  NativeBarMenuItem(
+                    label: context.t.search_by_context,
+                    icon: Icons.image_search_rounded,
+                    selected: textSearchType.value == TextSearchType.context,
+                    onPressed: () => selectSearchType(TextSearchType.context, context.t.sunrise_on_the_beach),
                   ),
+                NativeBarMenuItem(
+                  label: context.t.search_filter_filename,
+                  icon: Icons.abc_rounded,
+                  selected: textSearchType.value == TextSearchType.filename,
+                  onPressed: () => selectSearchType(TextSearchType.filename, context.t.file_name_or_extension),
                 ),
-                MenuItemButton(
-                  child: ListTile(
-                    leading: const Icon(Icons.abc_rounded),
-                    title: Text(
-                      context.t.search_filter_filename,
-                      style: context.textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w500,
-                        color: textSearchType.value == TextSearchType.filename ? context.colorScheme.primary : null,
-                      ),
-                    ),
-                    selectedColor: context.colorScheme.primary,
-                    selected: textSearchType.value == TextSearchType.filename,
+                NativeBarMenuItem(
+                  label: context.t.search_by_description,
+                  icon: Icons.text_snippet_outlined,
+                  selected: textSearchType.value == TextSearchType.description,
+                  onPressed: () =>
+                      selectSearchType(TextSearchType.description, context.t.search_by_description_example),
+                ),
+                if (serverFeatures.ocr)
+                  NativeBarMenuItem(
+                    label: context.t.search_by_ocr,
+                    icon: Icons.document_scanner_outlined,
+                    selected: textSearchType.value == TextSearchType.ocr,
+                    onPressed: () => selectSearchType(TextSearchType.ocr, context.t.search_by_ocr_example),
                   ),
-                  onPressed: () {
-                    textSearchType.value = TextSearchType.filename;
-                    searchHintText.value = context.t.file_name_or_extension;
-                  },
-                ),
-                MenuItemButton(
-                  child: ListTile(
-                    leading: const Icon(Icons.text_snippet_outlined),
-                    title: Text(
-                      context.t.search_by_description,
-                      style: context.textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w500,
-                        color: textSearchType.value == TextSearchType.description ? context.colorScheme.primary : null,
-                      ),
-                    ),
-                    selectedColor: context.colorScheme.primary,
-                    selected: textSearchType.value == TextSearchType.description,
-                  ),
-                  onPressed: () {
-                    textSearchType.value = TextSearchType.description;
-                    searchHintText.value = context.t.search_by_description_example;
-                  },
-                ),
-                FeatureCheck(
-                  feature: (features) => features.ocr,
-                  child: MenuItemButton(
-                    child: ListTile(
-                      leading: const Icon(Icons.document_scanner_outlined),
-                      title: Text(
-                        context.t.search_by_ocr,
-                        style: context.textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w500,
-                          color: textSearchType.value == TextSearchType.ocr ? context.colorScheme.primary : null,
-                        ),
-                      ),
-                      selectedColor: context.colorScheme.primary,
-                      selected: textSearchType.value == TextSearchType.ocr,
-                    ),
-                    onPressed: () {
-                      textSearchType.value = TextSearchType.ocr;
-                      searchHintText.value = context.t.search_by_ocr_example;
-                    },
-                  ),
-                ),
               ],
             ),
           ),
         ],
-        title: DecoratedBox(
-          decoration: BoxDecoration(
-            border: Border.all(color: context.colorScheme.onSurface.withAlpha(0), width: 0),
-            borderRadius: const BorderRadius.all(Radius.circular(24)),
-            gradient: LinearGradient(
-              colors: [
-                context.colorScheme.primary.withValues(alpha: 0.075),
-                context.colorScheme.primary.withValues(alpha: 0.09),
-                context.colorScheme.primary.withValues(alpha: 0.075),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: SearchField(
-            hintText: searchHintText.value,
-            key: const Key('search_text_field'),
-            controller: textSearchController,
-            contentPadding: filter.value.assetId != null ? const EdgeInsets.only(left: 24) : const EdgeInsets.all(8),
-            prefixIcon: filter.value.assetId != null
-                ? null
-                : Icon(getSearchPrefixIcon(), color: context.colorScheme.primary),
-            onSubmitted: handleTextSubmitted,
-            focusNode: ref.watch(searchInputFocusProvider),
-          ),
-        ),
+        // Null where the platform draws the field, which is also what lets the rest
+        // of this bar translate.
+        title: NativeSearch.isActive
+            ? null
+            : DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: context.colorScheme.onSurface.withAlpha(0), width: 0),
+                  borderRadius: const BorderRadius.all(Radius.circular(24)),
+                  gradient: LinearGradient(
+                    colors: [
+                      context.colorScheme.primary.withValues(alpha: 0.075),
+                      context.colorScheme.primary.withValues(alpha: 0.09),
+                      context.colorScheme.primary.withValues(alpha: 0.075),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: SearchField(
+                  hintText: searchHintText.value,
+                  key: const Key('search_text_field'),
+                  controller: textSearchController,
+                  contentPadding: filter.value.assetId != null
+                      ? const EdgeInsets.only(left: 24)
+                      : const EdgeInsets.all(8),
+                  prefixIcon: filter.value.assetId != null
+                      ? null
+                      : Icon(getSearchPrefixIcon(), color: context.colorScheme.primary),
+                  onSubmitted: handleTextSubmitted,
+                  focusNode: ref.watch(searchInputFocusProvider),
+                ),
+              ),
       ),
       body: CustomScrollView(
         slivers: [
