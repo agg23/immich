@@ -13,6 +13,7 @@ import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/datetime_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/native_shell/native_bar_menu.dart';
+import 'package:immich_mobile/native_shell/native_bar_publisher.dart';
 import 'package:immich_mobile/native_shell/native_hero_bar.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
 import 'package:immich_mobile/providers/infrastructure/current_album.provider.dart';
@@ -41,7 +42,8 @@ class RemoteAlbumSliverAppBar extends ConsumerStatefulWidget {
   ConsumerState<RemoteAlbumSliverAppBar> createState() => _RemoteAlbumSliverAppBarState();
 }
 
-class _RemoteAlbumSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBar> with NativeHeroBar {
+class _RemoteAlbumSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBar>
+    with NativeBarPublisher, NativeHeroBar {
   double _scrollProgress = 0.0;
 
   double _calculateScrollProgress(FlexibleSpaceBarSettings? settings) {

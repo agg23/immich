@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:immich_mobile/native_shell/native_bar_menu.dart';
+import 'package:immich_mobile/native_shell/native_icon.dart';
 import 'package:immich_mobile/native_shell/native_shell.dart';
-import 'package:immich_mobile/native_shell/native_symbols.dart';
 
 NativeBarAction? translateAction(Widget widget) {
   if (widget is NativeBarMenu) {
@@ -12,8 +12,8 @@ NativeBarAction? translateAction(Widget widget) {
     if (icon is! Icon) {
       return null;
     }
-    final symbol = nativeSymbolFor(icon.icon);
-    return symbol == null ? null : NativeBarAction(symbol: symbol, onPressed: widget.onPressed);
+    final token = nativeIconFor(icon.icon);
+    return token == null ? null : NativeBarAction(icon: token, onPressed: widget.onPressed);
   }
   if (widget is TextButton) {
     final child = widget.child;
@@ -46,7 +46,7 @@ String? untranslatableAction(List<Widget>? actions) {
     }
     if (action is IconButton) {
       final icon = action.icon;
-      return icon is Icon ? 'no symbol for ${icon.icon}' : 'IconButton with ${icon.runtimeType}';
+      return icon is Icon ? 'no icon token for ${icon.icon}' : 'IconButton with ${icon.runtimeType}';
     }
     return 'action is ${action.runtimeType}';
   }

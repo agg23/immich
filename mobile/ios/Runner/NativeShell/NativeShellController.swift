@@ -1,57 +1,47 @@
 import UIKit
 
-final class NativeShellController: UITabBarController, UITabBarControllerDelegate {
-  enum Tab: String, CaseIterable {
-    case photos
-    case search
-    case albums
-    case library
+/// One tab, as Dart declared it; only the icon is decided on this side.
+struct ShellTab {
+  let id: String
+  let label: String
+  let icon: ShellIcon?
 
-    var title: String {
-      switch self {
-      case .photos: "Photos"
-      case .search: "Search"
-      case .albums: "Albums"
-      case .library: "Library"
-      }
-    }
-
-    var index: Int { Self.allCases.firstIndex(of: self)! }
-
-    static func at(_ index: Int) -> Tab? { allCases.indices.contains(index) ? allCases[index] : nil }
-
-    var symbol: String {
-      switch self {
-      case .photos: "photo.on.rectangle"
-      case .search: "magnifyingglass"
-      case .albums: "rectangle.stack"
-      case .library: "square.grid.2x2"
-      }
-    }
+  init?(_ raw: [String: Any]) {
+    guard let id = raw["id"] as? String else { return nil }
+    self.id = id
+    label = raw["label"] as? String ?? id
+    icon = (raw["icon"] as? String).flatMap(ShellIcon.init(rawValue:))
   }
+}
+
+final class NativeShellController: UITabBarController, UITabBarControllerDelegate {
+  private let shellTabs: [ShellTab]
+
+  init(tabs: [ShellTab]) {
+    shellTabs = tabs
+    super.init(nibName: nil, bundle: nil)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("not supported") }
 
   override func viewDidLoad() {
     super.viewDidLoad()
 
-    viewControllers = Tab.allCases.enumerated().map { index, tab in
+    viewControllers = shellTabs.enumerated().map { index, tab in
       let root: UIViewController
-      if tab == .photos, let main = TimelineSessions.shared.source(for: TimelineSessions.mainSession) {
+      if index == 0, let main = TimelineSessions.shared.source(for: TimelineSessions.mainSession) {
         root = NativeTimelineViewController(source: main)
       } else {
-        root = FlutterTabController(route: tab.rawValue, label: tab.title)
+        root = FlutterTabController(route: tab.id, label: tab.label)
       }
 
       let nav = UINavigationController(rootViewController: root)
-      nav.navigationBar.prefersLargeTitles = tab == .photos
-      let container: UIViewController = nav
+      nav.navigationBar.prefersLargeTitles = index == 0
 
-      container.tabBarItem = UITabBarItem(
-        title: tab.title,
-        image: UIImage(systemName: tab.symbol),
-        tag: index
-      )
-      container.tabBarItem.accessibilityIdentifier = "tab-\(tab.rawValue)"
-      return container
+      nav.tabBarItem = UITabBarItem(title: tab.label, image: tab.icon?.image, tag: index)
+      nav.tabBarItem.accessibilityIdentifier = "tab-\(tab.id)"
+      return nav
     }
 
     scheduleDebugTabHooks()
@@ -63,22 +53,26 @@ final class NativeShellController: UITabBarController, UITabBarControllerDelegat
     }
   }
 
+  private func tab(at index: Int) -> ShellTab? { shellTabs.indices.contains(index) ? shellTabs[index] : nil }
+
+  func index(ofTab id: String) -> Int? { shellTabs.firstIndex { $0.id == id } }
+
   /// The container cannot say this: returned to covered, it gets no `viewWillAppear`.
   func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
     announceSelectedTab()
   }
 
   func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
-    if viewControllers?.firstIndex(of: viewController) == selectedIndex, let tab = Tab.at(selectedIndex) {
-      ShellBridge.shared.popToRoot(tab: tab.rawValue)
+    if viewControllers?.firstIndex(of: viewController) == selectedIndex, let tab = tab(at: selectedIndex) {
+      ShellBridge.shared.popToRoot(tab: tab.id)
     }
     return true
   }
 
   func announceSelectedTab() {
-    guard let tab = Tab.at(selectedIndex) else { return }
-    shellLog("[shell] tab bar selected %@", tab.rawValue)
-    ShellBridge.shared.show(route: tab.rawValue) { surface in
+    guard let tab = tab(at: selectedIndex) else { return }
+    shellLog("[shell] tab bar selected %@", tab.id)
+    ShellBridge.shared.show(route: tab.id) { surface in
       ShellEngine.shared.dartIsShowing(surface)
     }
   }

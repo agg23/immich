@@ -1,6 +1,6 @@
-import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:immich_mobile/native_shell/native_bar_actions.dart';
+import 'package:immich_mobile/native_shell/native_bar_publisher.dart';
 import 'package:immich_mobile/native_shell/native_shell.dart';
 
 class NativeSliverAppBar extends StatefulWidget {
@@ -34,44 +34,9 @@ class NativeSliverAppBar extends StatefulWidget {
   State<NativeSliverAppBar> createState() => _NativeSliverAppBarState();
 }
 
-class _NativeSliverAppBarState extends State<NativeSliverAppBar> {
-  String? _route;
-
+class _NativeSliverAppBarState extends State<NativeSliverAppBar> with NativeBarPublisher<NativeSliverAppBar> {
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _route ??= RouteData.of(context).name;
-    _publish();
-  }
-
-  @override
-  void didUpdateWidget(NativeSliverAppBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _publish();
-  }
-
-  void _publish() {
-    final route = _route;
-    if (route == null || !NativeShell.isActive) {
-      return;
-    }
-    final actions = translateActions(widget.actions);
-    if (actions == null) {
-      NativeShell.logFallback(route, untranslatableAction(widget.actions) ?? 'unknown');
-      NativeShell.clearBar(route);
-      return;
-    }
-    NativeShell.publishBar(route, title: widget.title, actions: actions);
-  }
-
-  @override
-  void dispose() {
-    final route = _route;
-    if (route != null) {
-      NativeShell.clearBar(route);
-    }
-    super.dispose();
-  }
+  void publishBar() => publishTranslated(title: widget.title, actions: widget.actions);
 
   @override
   Widget build(BuildContext context) {

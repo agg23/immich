@@ -3,24 +3,29 @@ import 'dart:io';
 import 'dart:ui' show ImageByteFormat;
 
 import 'package:auto_route/auto_route.dart';
+import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:immich_mobile/native_shell/native_bar_registry.dart';
+import 'package:immich_mobile/native_shell/native_icon.dart';
+import 'package:immich_mobile/native_shell/native_shell_debug.dart';
+import 'package:immich_mobile/routing/tabs.dart';
 
 class NativeMenuItem {
-  const NativeMenuItem({required this.label, this.symbol, this.onPressed, this.destructive = false});
+  const NativeMenuItem({required this.label, this.icon, this.onPressed, this.destructive = false});
 
   final String label;
 
-  /// Null means the symbol table is short, and the whole bar falls back.
-  final String? symbol;
+  /// Null means the icon vocabulary is short, and the whole bar falls back.
+  final NativeIcon? icon;
   final VoidCallback? onPressed;
   final bool destructive;
 
   Map<String, Object?> describe() => {
     'label': label,
-    if (symbol != null) 'symbol': symbol,
+    if (icon != null) 'icon': icon!.name,
     'enabled': onPressed != null,
     if (destructive) 'destructive': true,
   };
@@ -30,26 +35,26 @@ class NativeMenuItem {
   bool operator ==(Object other) =>
       other is NativeMenuItem &&
       other.label == label &&
-      other.symbol == symbol &&
+      other.icon == icon &&
       other.destructive == destructive &&
       (other.onPressed == null) == (onPressed == null);
 
   @override
-  int get hashCode => Object.hash(label, symbol, destructive, onPressed == null);
+  int get hashCode => Object.hash(label, icon, destructive, onPressed == null);
 }
 
 class NativeBarAction {
-  const NativeBarAction({this.symbol, this.label, this.onPressed, this.menu});
+  const NativeBarAction({this.icon, this.label, this.onPressed, this.menu});
 
-  final String? symbol;
+  final NativeIcon? icon;
   final String? label;
   final VoidCallback? onPressed;
 
-  /// With a menu, UIKit opens it and [onPressed] is never called.
+  /// With a menu, the platform opens it and [onPressed] is never called.
   final List<NativeMenuItem>? menu;
 
   Map<String, Object?> describe() => {
-    if (symbol != null) 'symbol': symbol,
+    if (icon != null) 'icon': icon!.name,
     if (label != null) 'label': label,
     'enabled': menu != null || onPressed != null,
     if (menu != null) 'menu': [for (final item in menu!) item.describe()],
@@ -58,21 +63,19 @@ class NativeBarAction {
   @override
   bool operator ==(Object other) =>
       other is NativeBarAction &&
-      other.symbol == symbol &&
+      other.icon == icon &&
       other.label == label &&
       (other.onPressed == null) == (onPressed == null) &&
       listEquals(other.menu, menu);
 
   @override
-  int get hashCode => Object.hash(symbol, label, onPressed == null, Object.hashAll(menu ?? const []));
+  int get hashCode => Object.hash(icon, label, onPressed == null, Object.hashAll(menu ?? const []));
 }
 
 class NativeShell {
   static const _channel = MethodChannel('immich/shell');
 
   static bool get isActive => Platform.isIOS;
-
-  static const _tabs = ['photos', 'search', 'albums', 'library'];
 
   /// A sync that crosses a tab tap names the *previous* tab; comparing against
   /// this is what stops it reversing the tap.
@@ -84,20 +87,7 @@ class NativeShell {
 
   static Future<void>? _pendingPop;
 
-  static const _shellRoutes = {
-    'SplashScreenRoute',
-    'LoginRoute',
-    'ChangePasswordRoute',
-    'TabShellRoute',
-    'PhotosTabRoute',
-    'SearchTabRoute',
-    'AlbumsTabRoute',
-    'LibraryTabRoute',
-    'MainTimelineRoute',
-    'SearchRoute',
-    'AlbumsRoute',
-    'LibraryRoute',
-  };
+  static final _shellRoutes = nativeShellRoutes;
 
   static void attach(TabsRouter tabsRouter) {
     if (!isActive || _tabsRouter == tabsRouter) {
@@ -112,7 +102,12 @@ class NativeShell {
       _handlerInstalled = true;
       _channel.setMethodCallHandler(_handle);
     }
-    unawaited(_channel.invokeMethod('ready'));
+    // Must land before `auth` flips the native root over to the shell.
+    unawaited(
+      _channel.invokeMethod('ready', {
+        'tabs': [for (final tab in NativeTab.values) tab.describe()],
+      }),
+    );
     unawaited(_channel.invokeMethod('auth', {'signedIn': true}));
     syncStack(force: true);
   }
@@ -132,6 +127,9 @@ class NativeShell {
   }
 
   static RootStackRouter? get debugRouter => _router;
+
+  /// The stack a scripted push lands on, which is not always the root.
+  static StackRouter? get debugActiveRouter => _activeRouter();
 
   static void log(String message) {
     // Not `kDebugMode`: the shell only runs at speed in a profile build.
@@ -170,8 +168,8 @@ class NativeShell {
 
   static StackRouter? _routerForTab(String tab) {
     final tabs = _tabsRouter;
-    final index = _tabs.indexOf(tab);
-    return tabs == null || index < 0 ? null : tabs.stackRouterOfIndex(index);
+    final index = NativeTab.byId(tab)?.index;
+    return tabs == null || index == null ? null : tabs.stackRouterOfIndex(index);
   }
 
   static Future<void> _popToRoot(String tab) async {
@@ -191,12 +189,8 @@ class NativeShell {
     return [
       for (final data in _activeStack())
         if (!_shellRoutes.contains(data.name) && !_overlayRoutes.contains(data.name))
-          {
-            'name': data.name,
-            'title': _bars[data.name]?.title,
-            'actions': [for (final action in _bars[data.name]?.actions ?? const <NativeBarAction>[]) action.describe()],
-            'hero': _bars[data.name]?.hero ?? false,
-          },
+          _bars[data.name]?.describe(data.name) ??
+              {'name': data.name, 'title': null, 'actions': const [], 'hero': false},
     ];
   }
 
@@ -208,28 +202,19 @@ class NativeShell {
     return stack.isNotEmpty && _overlayRoutes.contains(stack.last.name);
   }
 
-  static final _bars = <String, ({String title, List<NativeBarAction> actions, bool hero})>{};
+  static final _bars = NativeBarRegistry(onChanged: _syncAfterFrame);
+
+  @visibleForTesting
+  static NativeBarRegistry get bars => _bars;
 
   static void publishBar(
     String route, {
     required String title,
     required List<NativeBarAction> actions,
     bool hero = false,
-  }) {
-    final existing = _bars[route];
-    if (existing != null && existing.title == title && existing.hero == hero && listEquals(existing.actions, actions)) {
-      return;
-    }
-    _bars[route] = (title: title, actions: actions, hero: hero);
-    _syncAfterFrame();
-  }
+  }) => _bars.publish(route, NativeBar(title: title, actions: actions, hero: hero));
 
-  static void clearBar(String route) {
-    _collapsed.remove(route);
-    if (_bars.remove(route) != null) {
-      _syncAfterFrame();
-    }
-  }
+  static void clearBar(String route) => _bars.clear(route);
 
   static void logFallback(String route, String reason) => log('bar fallback $route: $reason');
 
@@ -250,7 +235,9 @@ class NativeShell {
     });
   }
 
-  static String? _lastSync;
+  static Map<String, Object?>? _lastSync;
+
+  static const _sameSync = DeepCollectionEquality();
 
   static void syncStack({bool force = false}) {
     if (!isActive) {
@@ -266,26 +253,23 @@ class NativeShell {
       'tab': tab,
       'claimTab': claimTab,
     };
-    final signature = payload.toString();
-    if (!force && signature == _lastSync) {
+    // Structural, not stringified: `Map.toString` is not a uniqueness contract.
+    if (!force && _sameSync.equals(payload, _lastSync)) {
       return;
     }
-    _lastSync = signature;
-    log('sync $signature ${_where()}');
+    _lastSync = payload;
+    log('sync $payload ${_where()}');
     if (claimTab) {
       _nativeTab = tab;
     }
     unawaited(_channel.invokeMethod('sync', payload));
   }
 
-  static final _collapsed = <String, bool>{};
-
   /// A threshold, not a stream: the fade between the two states is native.
   static void setBarCollapsed(String route, {required bool collapsed}) {
-    if (!isActive || _collapsed[route] == collapsed) {
+    if (!isActive || !_bars.setCollapsed(route, collapsed: collapsed)) {
       return;
     }
-    _collapsed[route] = collapsed;
     log('bar $route ${collapsed ? 'collapsed' : 'expanded'}');
     unawaited(_channel.invokeMethod('barCollapsed', {'route': route, 'collapsed': collapsed}));
   }
@@ -316,7 +300,7 @@ class NativeShell {
     }
     final stack = tabs.stackRouterOfIndex(tabs.activeIndex);
     if (stack != null && _stackRouters.add(stack)) {
-      log('watching ${_tabs[tabs.activeIndex]} stack');
+      log('watching ${NativeTab.at(tabs.activeIndex)?.id} stack');
       stack.addListener(didChangeRoutes);
     }
   }
@@ -377,28 +361,6 @@ class NativeShell {
     }
   }
 
-  static Future<void> _debugPush(String names) async {
-    final router = _activeRouter();
-    if (router == null) {
-      log('no router to push $names onto');
-      return;
-    }
-    for (final name in names.split(',')) {
-      log('debug push $name onto ${router.current.name}');
-      try {
-        unawaited(
-          router
-              .push(PageRouteInfo<void>(name))
-              .then((_) {}, onError: (Object error) => log('debug push $name refused: $error')),
-        );
-      } catch (error) {
-        log('debug push $name threw: $error');
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 900));
-      log('debug push $name left ${router.stackData.map((d) => d.name).join('/')}');
-    }
-  }
-
   static final insets = ValueNotifier<EdgeInsets?>(null);
 
   static Future<dynamic> _handle(MethodCall call) async {
@@ -423,16 +385,9 @@ class NativeShell {
         await _popFromNative(args?['name'] as String?);
       case 'show':
         return _show(args?['route'] as String?);
-
-      case 'debugPush':
-        await _debugPush(args!['name']! as String);
-      case 'debugPop':
-        await _router?.maybePopTop();
-      case 'debugTab':
-        final index = _tabs.indexOf(args!['tab']! as String);
-        if (index >= 0) {
-          _tabsRouter?.setActiveIndex(index);
-          syncStack(force: true);
+      default:
+        if (!await NativeShellDebug.handle(call, router: _router, tabs: _tabsRouter)) {
+          log('unhandled native call ${call.method}');
         }
     }
     return null;
@@ -442,31 +397,29 @@ class NativeShell {
     final route = args['route']! as String;
     final index = args['index']! as int;
     final item = args['item'] as int? ?? -1;
-    final action = _bars[route]?.actions.elementAtOrNull(index);
-    final row = item < 0 ? null : action?.menu?.elementAtOrNull(item);
     final what = 'barAction $route #$index${item < 0 ? '' : ' row $item'}';
-    if (action == null || (item >= 0 && row == null)) {
+    final hit = _bars.resolve(route: route, index: index, item: item);
+    if (hit == null) {
       log('$what: gone, re-syncing');
       syncStack(force: true);
       return;
     }
     log(what);
-    // Not `row?.onPressed ?? action.onPressed`: a disabled row would fall through.
-    (row != null ? row.onPressed : action.onPressed)?.call();
+    NativeBarRegistry.handlerFor(hit)?.call();
   }
 
   static Future<Map<String, Object?>> _show(String? route) async {
     await _pendingPop;
 
-    final index = route == null ? -1 : _tabs.indexOf(route);
-    log('show $route index=$index ${_where()}');
-    if (index >= 0) {
+    final tab = NativeTab.byId(route);
+    log('show $route index=${tab?.index ?? -1} ${_where()}');
+    if (tab != null) {
       final router = _tabsRouter;
       if (router == null) {
         log('asked for $route before the tab shell existed');
       } else {
-        _nativeTab = route!;
-        router.setActiveIndex(index);
+        _nativeTab = tab.id;
+        router.setActiveIndex(tab.index);
       }
     }
 
@@ -475,10 +428,7 @@ class NativeShell {
     return {'surface': surface()};
   }
 
-  static String _activeTab() {
-    final index = _tabsRouter?.activeIndex;
-    return index == null || index < 0 || index >= _tabs.length ? '' : _tabs[index];
-  }
+  static String _activeTab() => NativeTab.at(_tabsRouter?.activeIndex)?.id ?? '';
 
   static String surface() => _mirroredStack().lastOrNull?['name'] as String? ?? _activeTab();
 

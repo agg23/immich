@@ -9,6 +9,7 @@ import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/native_shell/native_bar_publisher.dart';
 import 'package:immich_mobile/native_shell/native_hero_bar.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
@@ -23,7 +24,8 @@ class MesmerizingSliverAppBar extends ConsumerStatefulWidget {
   ConsumerState<MesmerizingSliverAppBar> createState() => _MesmerizingSliverAppBarState();
 }
 
-class _MesmerizingSliverAppBarState extends ConsumerState<MesmerizingSliverAppBar> with NativeHeroBar {
+class _MesmerizingSliverAppBarState extends ConsumerState<MesmerizingSliverAppBar>
+    with NativeBarPublisher, NativeHeroBar {
   double _scrollProgress = 0.0;
 
   double _calculateScrollProgress(FlexibleSpaceBarSettings? settings) {

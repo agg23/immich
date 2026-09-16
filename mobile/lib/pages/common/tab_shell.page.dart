@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -16,7 +15,7 @@ import 'package:immich_mobile/providers/infrastructure/memory.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/readonly_mode.provider.dart';
 import 'package:immich_mobile/providers/search/search_input_focus.provider.dart';
 import 'package:immich_mobile/providers/tab.provider.dart';
-import 'package:immich_mobile/routing/router.dart';
+import 'package:immich_mobile/routing/tabs.dart';
 
 @RoutePage()
 class TabShellPage extends ConsumerStatefulWidget {
@@ -84,7 +83,7 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
     }
 
     return AutoTabsRouter(
-      routes: const [PhotosTabRoute(), SearchTabRoute(), AlbumsTabRoute(), LibraryTabRoute()],
+      routes: NativeTab.routes,
       duration: NativeShell.isActive ? Duration.zero : const Duration(milliseconds: 600),
       transitionBuilder: (context, child, animation) => FadeTransition(opacity: animation, child: child),
       builder: (context, child) {

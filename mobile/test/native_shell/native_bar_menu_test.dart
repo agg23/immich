@@ -49,14 +49,14 @@ void main() {
       expect(menu.describe()?.menu?.single.destructive, isTrue);
     });
 
-    test('refuses to translate a row it has no symbol for', () {
+    test('refuses to translate a row it has no icon token for', () {
       const menu = NativeBarMenu(
         icon: trigger,
         items: [NativeBarMenuItem(label: 'Mystery', icon: Icons.abc)],
       );
 
       expect(menu.describe(), isNull);
-      expect(menu.untranslatable(), contains('no symbol for menu row'));
+      expect(menu.untranslatable(), contains('no icon token for menu row'));
     });
   });
 }

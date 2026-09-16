@@ -53,7 +53,7 @@ final class NativeTimelineViewController: UIViewController {
 
     source.addObserver(
       self,
-      bucketsChanged: { [weak self] in
+      sectionsChanged: { [weak self] in
         self?.collectionView.reloadData()
       },
       pageLoaded: { [weak self] page in
@@ -188,11 +188,11 @@ final class NativeTimelineViewController: UIViewController {
 
 extension NativeTimelineViewController: UICollectionViewDataSource {
   func numberOfSections(in collectionView: UICollectionView) -> Int {
-    source.buckets.count
+    source.sections.count
   }
 
   func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-    source.buckets[section].count
+    source.sections[section].count
   }
 
   func collectionView(
@@ -218,7 +218,7 @@ extension NativeTimelineViewController: UICollectionViewDataSource {
       withReuseIdentifier: TimelineDayHeader.reuseID,
       for: indexPath
     ) as! TimelineDayHeader
-    header.configure(title: title(for: source.buckets[indexPath.section].date))
+    header.configure(title: title(for: source.sections[indexPath.section].date))
     return header
   }
 }

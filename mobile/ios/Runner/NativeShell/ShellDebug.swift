@@ -1,7 +1,11 @@
 import Flutter
 import UIKit
 
-/// Scripted hooks, driven by `-immichShell…` launch arguments and inert without one.
+// `SHELL_DEBUG` is Debug and Profile, never Release; the stubs below keep the
+// call sites compiling either way.
+#if SHELL_DEBUG
+
+/// Driven by `-immichShell…` launch arguments, and inert without one.
 extension ShellBridge {
   func scheduleDebugHooks() {
     scheduleDebugDartTab()
@@ -141,8 +145,8 @@ extension ShellBridge {
 
 extension NativeShellController {
   func scheduleDebugTabHooks() {
-    if let name = UserDefaults.standard.string(forKey: "immichShellTab"), let tab = Tab(rawValue: name) {
-      selectedIndex = tab.index
+    if let name = UserDefaults.standard.string(forKey: "immichShellTab"), let index = index(ofTab: name) {
+      selectedIndex = index
       shellLog("[shell] initial tab=%@", name)
     }
 
@@ -156,7 +160,7 @@ extension NativeShellController {
 
     guard let names = UserDefaults.standard.string(forKey: "immichShellSwitchTo") else { return }
     for (step, name) in names.split(separator: ",").enumerated() {
-      guard let index = Tab(rawValue: String(name))?.index else { continue }
+      guard let index = index(ofTab: String(name)) else { continue }
       DispatchQueue.main.asyncAfter(deadline: .now() + 6 + Double(step) * 4) { [weak self] in
         shellLog("[shell] debug: switching to tab=%@", String(name))
         self?.selectedIndex = index
@@ -165,3 +169,18 @@ extension NativeShellController {
     }
   }
 }
+
+#else
+
+extension ShellBridge {
+  func scheduleDebugHooks() {}
+  func scheduleDebugPop(on nav: UINavigationController) {}
+  func scheduleDebugViewer(on engine: FlutterEngine) {}
+  func scheduleDebugAlbum(on engine: FlutterEngine) {}
+}
+
+extension NativeShellController {
+  func scheduleDebugTabHooks() {}
+}
+
+#endif

@@ -29,8 +29,10 @@ struct TimelineAsset {
   }
 }
 
+/// A window onto one Dart timeline. Offsets, page size and window completeness are
+/// Dart's; what is left here is what a collection view needs synchronously.
 final class ImmichTimelineSource {
-  struct Bucket {
+  struct Section {
     let date: Date?
     let count: Int
     let offset: Int
@@ -38,20 +40,21 @@ final class ImmichTimelineSource {
 
   let session: Int
 
-  private(set) var buckets: [Bucket] = []
+  private(set) var sections: [Section] = []
   private(set) var total = 0
+
+  /// A window from an older generation describes indices that have since moved.
+  private(set) var generation = -1
 
   private var pages: [Int: [TimelineAsset]] = [:]
   private var inFlight: Set<Int> = []
-  private var retries: [Int: Int] = [:]
-  private static let pageSize = 120
-  private static let maxRetries = 12
-  private static let retryDelay = 0.25
+
+  private var pageSize = 120
 
   private let channel: FlutterMethodChannel
 
   private struct Observer {
-    let bucketsChanged: () -> Void
+    let sectionsChanged: () -> Void
     let pageLoaded: (Int) -> Void
   }
 
@@ -64,12 +67,12 @@ final class ImmichTimelineSource {
 
   func addObserver(
     _ owner: AnyObject,
-    bucketsChanged: @escaping () -> Void,
+    sectionsChanged: @escaping () -> Void,
     pageLoaded: @escaping (Int) -> Void
   ) {
     let id = ObjectIdentifier(owner)
     observers.removeAll { $0.id == id }
-    observers.append((id, Observer(bucketsChanged: bucketsChanged, pageLoaded: pageLoaded)))
+    observers.append((id, Observer(sectionsChanged: sectionsChanged, pageLoaded: pageLoaded)))
   }
 
   func removeObserver(_ owner: AnyObject) {
@@ -82,88 +85,80 @@ final class ImmichTimelineSource {
   }
 
   func apply(_ args: [String: Any]) {
-    let raw = args["buckets"] as? [[String: Any]] ?? []
-    var offset = 0
-    var next: [Bucket] = []
-    next.reserveCapacity(raw.count)
-    for entry in raw {
-      let count = entry["count"] as? Int ?? 0
-      let date = (entry["date"] as? Int).map { Date(timeIntervalSince1970: Double($0) / 1000) }
-      next.append(Bucket(date: date, count: count, offset: offset))
-      offset += count
+    sections = (args["sections"] as? [[String: Any]] ?? []).map {
+      Section(
+        date: ($0["date"] as? Int).map { Date(timeIntervalSince1970: Double($0) / 1000) },
+        count: $0["count"] as? Int ?? 0,
+        offset: $0["offset"] as? Int ?? 0
+      )
     }
-    buckets = next
-    total = args["total"] as? Int ?? offset
+    total = args["total"] as? Int ?? sections.reduce(0) { $0 + $1.count }
+    pageSize = args["pageSize"] as? Int ?? pageSize
+    generation = args["generation"] as? Int ?? generation
     pages = [:]
     inFlight = []
-    retries = [:]
-    shellLog("[shell:timeline] session=%d buckets=%d total=%d", session, buckets.count, total)
-    for entry in observers { entry.observer.bucketsChanged() }
+    shellLog(
+      "[shell:timeline] session=%d gen=%d sections=%d total=%d",
+      session, generation, sections.count, total
+    )
+    for entry in observers { entry.observer.sectionsChanged() }
   }
 
   func asset(at flatIndex: Int) -> TimelineAsset? {
     guard flatIndex >= 0, flatIndex < total else { return nil }
-    let page = flatIndex / Self.pageSize
+    let page = flatIndex / pageSize
     guard let loaded = pages[page] else {
       request(page: page)
       return nil
     }
-    let offset = flatIndex - page * Self.pageSize
+    let offset = flatIndex - page * pageSize
     return offset < loaded.count ? loaded[offset] : nil
   }
 
   func flatIndex(for indexPath: IndexPath) -> Int {
-    guard indexPath.section < buckets.count else { return 0 }
-    return buckets[indexPath.section].offset + indexPath.item
+    guard indexPath.section < sections.count else { return 0 }
+    return sections[indexPath.section].offset + indexPath.item
   }
 
   func indexPath(for flatIndex: Int) -> IndexPath? {
-    guard let section = buckets.lastIndex(where: { $0.offset <= flatIndex }) else { return nil }
-    return IndexPath(item: flatIndex - buckets[section].offset, section: section)
+    guard let section = sections.lastIndex(where: { $0.offset <= flatIndex }) else { return nil }
+    return IndexPath(item: flatIndex - sections[section].offset, section: section)
   }
 
   func prefetch(around flatIndex: Int) {
-    request(page: flatIndex / Self.pageSize)
+    request(page: flatIndex / pageSize)
+  }
+
+  func range(ofPage page: Int) -> Range<Int> {
+    let start = page * pageSize
+    return start..<min(start + pageSize, total)
   }
 
   private func request(page: Int) {
     guard !inFlight.contains(page), pages[page] == nil else { return }
     inFlight.insert(page)
-    let index = page * Self.pageSize
+    let asked = generation
     let started = CFAbsoluteTimeGetCurrent()
-    let expected = min(Self.pageSize, total - index)
     channel.invokeMethod(
-      "assets",
-      arguments: ["session": session, "index": index, "count": Self.pageSize]
+      "window",
+      arguments: ["session": session, "start": page * pageSize, "count": pageSize]
     ) { [weak self] response in
       guard let self else { return }
       self.inFlight.remove(page)
-      guard let raw = response as? [[String: Any]] else { return }
+      guard let reply = response as? [String: Any],
+            let raw = reply["assets"] as? [[String: Any]] else { return }
       let ms = (CFAbsoluteTimeGetCurrent() - started) * 1000
-      // A short answer is not a page: Dart reports bucket counts before its buffer
-      // catches up, and caching that leaves those tiles blank forever.
-      guard raw.count >= expected else {
-        let attempt = (self.retries[page] ?? 0) + 1
-        self.retries[page] = attempt
+      let served = reply["generation"] as? Int ?? -1
+      guard served == asked, served == self.generation else {
         shellLog(
-          "[shell:timeline] session=%d page=%d short (%d of %d) in %.1fms, retry %d",
-          self.session, page, raw.count, expected, ms, attempt
+          "[shell:timeline] session=%d page=%d from gen %d, now %d: dropped",
+          self.session, page, served, self.generation
         )
-        guard attempt <= Self.maxRetries else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.retryDelay) { [weak self] in
-          self?.request(page: page)
-        }
         return
       }
-      self.retries[page] = nil
       self.pages[page] = raw.compactMap(TimelineAsset.init)
       shellLog("[shell:timeline] session=%d page=%d assets=%d in %.1fms", self.session, page, raw.count, ms)
       for entry in self.observers { entry.observer.pageLoaded(page) }
     }
-  }
-
-  func range(ofPage page: Int) -> Range<Int> {
-    let start = page * Self.pageSize
-    return start..<min(start + Self.pageSize, total)
   }
 }

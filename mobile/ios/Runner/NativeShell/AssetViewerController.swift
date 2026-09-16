@@ -104,7 +104,7 @@ final class AssetViewerController: UIViewController {
 
     source.addObserver(
       self,
-      bucketsChanged: { [weak self] in
+      sectionsChanged: { [weak self] in
         guard let self else { return }
         self.collectionView.reloadData()
         self.jumpToCurrentIndex()

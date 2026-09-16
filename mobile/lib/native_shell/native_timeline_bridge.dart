@@ -1,16 +1,15 @@
 import 'dart:async';
-
 import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/events.model.dart';
 import 'package:immich_mobile/domain/models/timeline.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
+import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/native_shell/native_shell.dart';
-import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart';
-import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
+import 'package:immich_mobile/native_shell/native_timeline_debug.dart';
+import 'package:immich_mobile/native_shell/native_timeline_window.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
-import 'package:immich_mobile/providers/user.provider.dart';
-import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/utils/debug_print.dart';
 import 'package:immich_mobile/utils/image_url_builder.dart';
 import 'package:openapi/api.dart';
@@ -25,6 +24,9 @@ class NativeTimelineBridge {
   int _nextSession = _mainSession + 1;
 
   static const _mainSession = 0;
+
+  /// Declared here so both platforms page identically.
+  static const pageSize = 120;
 
   void init() {
     if (!NativeShell.isActive) {
@@ -64,11 +66,15 @@ class NativeTimelineBridge {
     unawaited(_sessions.remove(id)?.cancel());
   }
 
+  TimelineService? _sessionService(int id) => _sessions[id]?.service;
+
   void _bind(int id, TimelineService service) {
     unawaited(_sessions.remove(id)?.cancel());
-    _sessions[id] = _Session(service, (buckets) {
-      unawaited(_channel.invokeMethod('invalidate', _describe(id, service, buckets)));
+    late final _Session session;
+    session = _Session(service, () {
+      unawaited(_channel.invokeMethod('invalidate', _describe(id, session)));
     });
+    _sessions[id] = session;
   }
 
   void dispose() {
@@ -86,99 +92,53 @@ class NativeTimelineBridge {
       case 'closeSession':
         closeSession((call.arguments as Map)['session']! as int);
         return null;
-      case 'assets':
+      case 'window':
         final args = (call.arguments as Map).cast<String, Object?>();
-        return _assets(args['session'] as int? ?? _mainSession, args['index']! as int, args['count']! as int);
-      case 'debugOpenViewer':
-        await _debugOpenViewer((call.arguments as Map?)?['timeline'] as String? ?? 'main');
-        return null;
-      case 'debugPushAlbum':
-        await _debugPushAlbum();
-        return null;
+        return _window(args['session'] as int? ?? _mainSession, args['start']! as int, args['count']! as int);
       default:
-        dPrint(() => 'native timeline: unhandled ${call.method}');
+        if (!await NativeTimelineDebug.handle(call, _ref, sessionService: _sessionService)) {
+          dPrint(() => 'native timeline: unhandled ${call.method}');
+        }
         return null;
     }
-  }
-
-  Future<void> _debugOpenViewer(String which) async {
-    final router = NativeShell.debugRouter;
-    NativeShell.log('debug viewer: which=$which router=${router != null}');
-    if (router == null) {
-      return;
-    }
-    final service = which == 'main' ? _sessions[_mainSession]?.service : _debugTimeline(which);
-    if (service == null) {
-      NativeShell.log('debug viewer: no $which timeline to open');
-      return;
-    }
-    final assets = service.totalAssets > 0 ? await service.loadAssets(0, 1) : const <BaseAsset>[];
-    if (assets.isNotEmpty) {
-      _ref.read(assetViewerProvider.notifier).reset();
-      _ref.read(assetViewerProvider.notifier).setAsset(assets.first);
-    }
-    NativeShell.log('debug viewer: $which has ${service.totalAssets}, pushing');
-    unawaited(router.push(AssetViewerRoute(initialIndex: 0, timelineService: service)));
-  }
-
-  Future<void> _debugPushAlbum() async {
-    final router = NativeShell.debugRouter;
-    if (router == null) {
-      NativeShell.log('debug album: no router');
-      return;
-    }
-    final albums = await _ref.read(remoteAlbumServiceProvider).getAll();
-    if (albums.isEmpty) {
-      NativeShell.log('debug album: no albums to open');
-      return;
-    }
-    final album = albums.reduce((a, b) => b.assetCount > a.assetCount ? b : a);
-    NativeShell.log('debug album: pushing ${album.name}, ${album.assetCount} assets (${albums.length} albums)');
-    unawaited(router.push(RemoteAlbumRoute(album: album)));
-  }
-
-  TimelineService? _debugTimeline(String which) {
-    final user = _ref.read(currentUserProvider);
-    if (user == null) {
-      return null;
-    }
-    final factory = _ref.read(timelineFactoryProvider);
-    return switch (which) {
-      'favorite' => factory.favorite(user.id),
-      'video' => factory.video(user.id),
-      _ => factory.recentlyAdded(user.id),
-    };
   }
 
   /// A signal, not a query: a reply would carry the state at the time of the call.
   void _open(int id) {
     final session = _sessions[id];
-    if (session == null || session.lastBuckets.isEmpty) {
+    if (session == null || session.sections.isEmpty) {
       return;
     }
-    unawaited(_channel.invokeMethod('invalidate', _describe(id, session.service, session.lastBuckets)));
+    unawaited(_channel.invokeMethod('invalidate', _describe(id, session)));
   }
 
-  Map<String, Object?> _describe(int id, TimelineService service, List<Bucket> buckets) => {
+  Map<String, Object?> _describe(int id, _Session session) => {
     'session': id,
-    'total': buckets.fold<int>(0, (sum, bucket) => sum + bucket.assetCount),
-    'buckets': [
-      for (final bucket in buckets)
-        {'count': bucket.assetCount, if (bucket is TimeBucket) 'date': bucket.date.millisecondsSinceEpoch},
-    ],
+    'generation': session.generation,
+    'total': session.sections.total,
+    'pageSize': pageSize,
+    'sections': session.sections.describe(),
   };
 
-  Future<List<Map<String, Object?>>> _assets(int id, int index, int count) async {
-    final service = _sessions[id]?.service;
-    if (service == null || count <= 0) {
-      return const [];
+  /// Stamped with the generation it was served from, so a window crossing an
+  /// invalidation is discarded rather than drawn at stale indices.
+  Future<Map<String, Object?>> _window(int id, int start, int count) async {
+    final session = _sessions[id];
+    if (session == null) {
+      return {'session': id, 'generation': -1, 'start': start, 'assets': const []};
     }
-    final clamped = count.clamp(0, service.totalAssets - index);
-    if (clamped <= 0) {
-      return const [];
-    }
-    final assets = await service.loadAssets(index, clamped);
-    return assets.map(_describeAsset).toList();
+    final generation = session.generation;
+    final window = clampWindow(start: start, count: count, total: session.sections.total);
+    final assets = window.count == 0
+        ? const <BaseAsset>[]
+        : await session.service.loadAssets(window.start, window.count);
+    return {
+      'session': id,
+      // Re-read: an invalidation may have landed while the load was in flight.
+      'generation': session.generation == generation ? generation : -1,
+      'start': window.start,
+      'assets': [for (final asset in assets) _describeAsset(asset)],
+    };
   }
 
   Map<String, Object?> _describeAsset(BaseAsset asset) {
@@ -198,23 +158,54 @@ class NativeTimelineBridge {
   }
 }
 
+/// Not driven straight off the bucket stream: [TimelineService] reloads its buffer
+/// on that same stream and raises its total only afterwards, so buckets published
+/// on arrival name assets it cannot yet hand over.
 class _Session {
-  _Session(this.service, void Function(List<Bucket>) publish) {
-    _buckets = service.watchBuckets().listen((buckets) {
-      if (buckets.isEmpty && lastBuckets.isNotEmpty) {
-        return;
-      }
-      lastBuckets = buckets;
-      publish(buckets);
-    });
+  _Session(this.service, this._publish) {
+    _buckets = service.watchBuckets().listen(_onBuckets);
+    // Shared by every timeline, so it is a hint to re-check, not a signal about this one.
+    _reloads = EventStream.shared.listen<TimelineReloadEvent>((_) => _publishIfServable());
   }
 
   final TimelineService service;
+  final void Function() _publish;
+
   late final StreamSubscription<List<Bucket>> _buckets;
+  late final StreamSubscription<TimelineReloadEvent> _reloads;
 
-  List<Bucket> lastBuckets = const [];
+  /// A window answered from an older generation is discarded rather than drawn.
+  int generation = 0;
 
-  Future<void> cancel() => _buckets.cancel();
+  TimelineSections sections = TimelineSections.empty;
+
+  TimelineSections? _pending;
+
+  void _onBuckets(List<Bucket> buckets) {
+    if (buckets.isEmpty && !sections.isEmpty) {
+      return;
+    }
+    _pending = TimelineSections.fromBuckets(buckets);
+    _publishIfServable();
+  }
+
+  /// Until the service can serve every claimed index, the platform keeps drawing
+  /// the previous generation: stale but coherent.
+  void _publishIfServable() {
+    final pending = _pending;
+    if (pending == null || pending.total != service.totalAssets) {
+      return;
+    }
+    _pending = null;
+    sections = pending;
+    generation++;
+    _publish();
+  }
+
+  Future<void> cancel() async {
+    await _buckets.cancel();
+    await _reloads.cancel();
+  }
 }
 
 final nativeTimelineBridgeProvider = Provider<NativeTimelineBridge>((ref) => NativeTimelineBridge(ref));

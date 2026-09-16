@@ -79,6 +79,7 @@ import 'package:immich_mobile/routing/auth_guard.dart';
 import 'package:immich_mobile/routing/duplicate_guard.dart';
 import 'package:immich_mobile/routing/locked_guard.dart';
 import 'package:immich_mobile/routing/native_viewer_guard.dart';
+import 'package:immich_mobile/routing/tabs.dart';
 import 'package:immich_mobile/services/api.service.dart';
 import 'package:immich_mobile/services/auth.service.dart';
 import 'package:immich_mobile/services/local_auth.service.dart';
@@ -199,39 +200,19 @@ class AppRouter extends RootStackRouter {
       page: TabShellRoute.page,
       guards: [_authGuard, _duplicateGuard],
       children: [
-        AutoRoute(
-          page: PhotosTabRoute.page,
-          children: [
-            AutoRoute(page: MainTimelineRoute.page, initial: true, guards: [_authGuard, _duplicateGuard]),
-            ..._pushable,
-          ],
-        ),
-        AutoRoute(
-          page: SearchTabRoute.page,
-          children: [
-            AutoRoute(
-              page: SearchRoute.page,
-              initial: true,
-              guards: [_authGuard, _duplicateGuard],
-              maintainState: false,
-            ),
-            ..._pushable,
-          ],
-        ),
-        AutoRoute(
-          page: LibraryTabRoute.page,
-          children: [
-            AutoRoute(page: LibraryRoute.page, initial: true, guards: [_authGuard, _duplicateGuard]),
-            ..._pushable,
-          ],
-        ),
-        AutoRoute(
-          page: AlbumsTabRoute.page,
-          children: [
-            AutoRoute(page: AlbumsRoute.page, initial: true, guards: [_authGuard, _duplicateGuard]),
-            ..._pushable,
-          ],
-        ),
+        for (final tab in NativeTab.values)
+          AutoRoute(
+            page: tab.page,
+            children: [
+              AutoRoute(
+                page: tab.rootPage,
+                initial: true,
+                guards: [_authGuard, _duplicateGuard],
+                maintainState: tab.maintainRootState,
+              ),
+              ..._pushable,
+            ],
+          ),
       ],
     ),
     // required to handle all deeplinks in deep_link.service.dart

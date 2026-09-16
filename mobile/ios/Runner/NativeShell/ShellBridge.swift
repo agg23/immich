@@ -13,6 +13,9 @@ final class ShellBridge {
   private(set) var authState: AuthState = .unknown
   var onAuthStateChange: ((AuthState) -> Void)?
 
+  /// Declared by Dart: order is identity across the channel, and labels are localised.
+  private(set) var tabs: [ShellTab] = []
+
   var channel: FlutterMethodChannel?
   private var dartIsReady = false
 
@@ -34,7 +37,8 @@ final class ShellBridge {
     switch call.method {
     case "ready":
       dartIsReady = true
-      shellLog("[shell] dart ready")
+      tabs = (args["tabs"] as? [[String: Any]] ?? []).compactMap(ShellTab.init)
+      shellLog("[shell] dart ready, tabs=[%@]", tabs.map(\.id).joined(separator: ","))
       if let route = pendingRoute {
         pendingRoute = nil
         let settle = pendingSettle ?? { _ in }
@@ -114,7 +118,7 @@ final class ShellBridge {
 
   private func selectIfNeeded(tab: String) {
     guard let shell = tabBarController,
-          let index = NativeShellController.Tab(rawValue: tab)?.index,
+          let index = tabs.firstIndex(where: { $0.id == tab }),
           index < (shell.viewControllers?.count ?? 0),
           shell.selectedIndex != index else { return }
     shellLog("[shell:nav] dart moved to %@", tab)
@@ -123,7 +127,7 @@ final class ShellBridge {
 
   private func navigationController(forTab tab: String) -> UINavigationController? {
     guard let shell = tabBarController else { return nil }
-    guard let index = NativeShellController.Tab(rawValue: tab)?.index,
+    guard let index = tabs.firstIndex(where: { $0.id == tab }),
           let controllers = shell.viewControllers, index < controllers.count else {
       return activeNavigationController
     }

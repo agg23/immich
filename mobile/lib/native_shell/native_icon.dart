@@ -1,0 +1,58 @@
+import 'package:flutter/material.dart';
+
+/// The only icon names that cross the channel; each platform draws its own artwork.
+enum NativeIcon {
+  add,
+  addPhoto,
+  addUser,
+  albums,
+  close,
+  comment,
+  delete,
+  deleteForever,
+  edit,
+  favorite,
+  favoriteFilled,
+  library,
+  link,
+  overflow,
+  pause,
+  photos,
+  play,
+  removeUser,
+  restore,
+  search,
+  settings,
+  slideshow,
+  sort,
+}
+
+final _icons = <IconData, NativeIcon>{
+  Icons.add_outlined: NativeIcon.add,
+  Icons.add_rounded: NativeIcon.add,
+  Icons.add_a_photo: NativeIcon.addPhoto,
+  Icons.group_add: NativeIcon.addUser,
+  Icons.close: NativeIcon.close,
+  Icons.chat_outlined: NativeIcon.comment,
+  Icons.delete: NativeIcon.delete,
+  Icons.delete_outline_rounded: NativeIcon.delete,
+  Icons.delete_forever_outlined: NativeIcon.deleteForever,
+  Icons.edit: NativeIcon.edit,
+  Icons.favorite_outline: NativeIcon.favorite,
+  Icons.favorite: NativeIcon.favoriteFilled,
+  Icons.link: NativeIcon.link,
+  Icons.more_vert: NativeIcon.overflow,
+  Icons.more_vert_rounded: NativeIcon.overflow,
+  Icons.pause: NativeIcon.pause,
+  Icons.play_arrow: NativeIcon.play,
+  Icons.person_remove_rounded: NativeIcon.removeUser,
+  Icons.restore_outlined: NativeIcon.restore,
+  Icons.search: NativeIcon.search,
+  Icons.settings: NativeIcon.settings,
+  Icons.settings_outlined: NativeIcon.settings,
+  Icons.slideshow_outlined: NativeIcon.slideshow,
+  Icons.swap_vert: NativeIcon.sort,
+  Icons.swap_vert_rounded: NativeIcon.sort,
+};
+
+NativeIcon? nativeIconFor(IconData? icon) => icon == null ? null : _icons[icon];

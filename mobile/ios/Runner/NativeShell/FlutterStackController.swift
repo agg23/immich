@@ -10,7 +10,10 @@ final class FlutterStackController: UIViewController, ShellFlutterHost {
   private var hero = false
   private var collapsed = false
 
-  private var menuHandlers: [String: () -> Void] = [:]
+  #if SHELL_DEBUG
+    /// So a scripted run can fire a menu row without a real touch.
+    private var menuHandlers: [String: () -> Void] = [:]
+  #endif
 
   var surfaceToken: String { shellLabel }
   var prefersNativeBarHidden: Bool { nativeTitle == nil }
@@ -37,7 +40,7 @@ final class FlutterStackController: UIViewController, ShellFlutterHost {
       return
     }
     shellLog("[shell:nav] %@ bar -> [%@]", shellLabel, actions.map { raw in
-      let head = (raw["symbol"] as? String) ?? (raw["label"] as? String) ?? "?"
+      let head = (raw["icon"] as? String) ?? (raw["label"] as? String) ?? "?"
       guard let rows = raw["menu"] as? [[String: Any]] else { return head }
       return "\(head){\(rows.compactMap { $0["label"] as? String }.joined(separator: "/"))}"
     }.joined(separator: ","))
@@ -82,7 +85,9 @@ final class FlutterStackController: UIViewController, ShellFlutterHost {
   private func menu(from rows: [[String: Any]], action index: Int) -> UIMenu {
     var ordinary: [UIAction] = []
     var destructive: [UIAction] = []
-    menuHandlers = menuHandlers.filter { !$0.key.hasPrefix("\(index).") }
+    #if SHELL_DEBUG
+      menuHandlers = menuHandlers.filter { !$0.key.hasPrefix("\(index).") }
+    #endif
     for (row, raw) in rows.enumerated() {
       let enabled = raw["enabled"] as? Bool ?? true
       let isDestructive = raw["destructive"] as? Bool ?? false
@@ -91,10 +96,12 @@ final class FlutterStackController: UIViewController, ShellFlutterHost {
       if isDestructive { attributes.insert(.destructive) }
       let element = UIAction(
         title: raw["label"] as? String ?? "",
-        image: (raw["symbol"] as? String).flatMap { UIImage(systemName: $0) },
+        image: ShellIcon.image(for: raw["icon"]),
         attributes: attributes
       ) { [weak self] _ in self?.fire(action: index, row: row) }
-      menuHandlers["\(index).\(row)"] = { [weak self] in self?.fire(action: index, row: row) }
+      #if SHELL_DEBUG
+        menuHandlers["\(index).\(row)"] = { [weak self] in self?.fire(action: index, row: row) }
+      #endif
       if isDestructive {
         destructive.append(element)
       } else {
@@ -112,23 +119,25 @@ final class FlutterStackController: UIViewController, ShellFlutterHost {
     ShellBridge.shared.barAction(route: shellLabel, index: index, item: row)
   }
 
-  func debugPerformMenu(action index: Int, row: Int) -> Bool {
-    guard let handler = menuHandlers["\(index).\(row)"] else { return false }
-    handler()
-    return true
-  }
+  #if SHELL_DEBUG
+    func debugPerformMenu(action index: Int, row: Int) -> Bool {
+      guard let handler = menuHandlers["\(index).\(row)"] else { return false }
+      handler()
+      return true
+    }
+  #endif
 
   private func applyActions() {
     navigationItem.rightBarButtonItems = actions.enumerated().reversed().map { index, raw in
       let item: UIBarButtonItem
       if let rows = raw["menu"] as? [[String: Any]] {
         item = UIBarButtonItem(
-          image: (raw["symbol"] as? String).flatMap { UIImage(systemName: $0) },
+          image: ShellIcon.image(for: raw["icon"]),
           menu: menu(from: rows, action: index)
         )
-      } else if let symbol = raw["symbol"] as? String {
+      } else if let image = ShellIcon.image(for: raw["icon"]) {
         item = UIBarButtonItem(
-          image: UIImage(systemName: symbol),
+          image: image,
           style: .plain,
           target: self,
           action: #selector(barActionTapped(_:))

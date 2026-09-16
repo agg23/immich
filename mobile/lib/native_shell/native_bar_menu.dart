@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
+import 'package:immich_mobile/native_shell/native_icon.dart';
 import 'package:immich_mobile/native_shell/native_shell.dart';
-import 'package:immich_mobile/native_shell/native_symbols.dart';
 import 'package:immich_mobile/presentation/widgets/action_buttons/base_action_button.widget.dart';
 
 class NativeBarMenuItem {
@@ -31,33 +31,33 @@ class NativeBarMenu extends StatelessWidget {
   final String? tooltip;
 
   NativeBarAction? describe() {
-    final trigger = nativeSymbolFor(icon);
+    final trigger = nativeIconFor(icon);
     if (trigger == null || items.isEmpty) {
       return null;
     }
     final rows = <NativeMenuItem>[];
     for (final item in items) {
-      final symbol = nativeSymbolFor(item.icon);
-      if (symbol == null) {
+      final token = nativeIconFor(item.icon);
+      if (token == null) {
         return null;
       }
       rows.add(
-        NativeMenuItem(label: item.label, symbol: symbol, onPressed: item.onPressed, destructive: item.destructive),
+        NativeMenuItem(label: item.label, icon: token, onPressed: item.onPressed, destructive: item.destructive),
       );
     }
-    return NativeBarAction(symbol: trigger, menu: rows);
+    return NativeBarAction(icon: trigger, menu: rows);
   }
 
   String? untranslatable() {
     if (items.isEmpty) {
       return 'menu has no rows';
     }
-    if (nativeSymbolFor(icon) == null) {
-      return 'no symbol for the menu trigger $icon';
+    if (nativeIconFor(icon) == null) {
+      return 'no icon token for the menu trigger $icon';
     }
     for (final item in items) {
-      if (nativeSymbolFor(item.icon) == null) {
-        return 'no symbol for menu row ${item.icon}';
+      if (nativeIconFor(item.icon) == null) {
+        return 'no icon token for menu row ${item.icon}';
       }
     }
     return null;
