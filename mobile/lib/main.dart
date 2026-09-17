@@ -22,6 +22,7 @@ import 'package:immich_mobile/infrastructure/repositories/network.repository.dar
 import 'package:immich_mobile/native_shell/native_route_observer.dart';
 import 'package:immich_mobile/native_shell/native_shell.dart';
 import 'package:immich_mobile/native_shell/native_shell_insets.dart';
+import 'package:immich_mobile/native_shell/native_shell_theme.dart';
 import 'package:immich_mobile/native_shell/native_timeline_bridge.dart';
 import 'package:immich_mobile/pages/common/splash_screen.page.dart';
 import 'package:immich_mobile/platform/background_worker_lock_api.g.dart';
@@ -128,6 +129,9 @@ class ImmichApp extends ConsumerStatefulWidget {
 class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The shell can provoke these without the app leaving the screen (a Flutter view
+    // controller going off screen behind a native root), so they are worth a trace.
+    NativeShell.log('lifecycle ${state.name}');
     switch (state) {
       case AppLifecycleState.resumed:
         dPrint(() => "[APP STATE] resumed");
@@ -285,7 +289,9 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
           child: RepaintBoundary(
             key: NativeShell.captureKey,
             child: NativeShellInsets(
-              child: ImmichThemeProvider(colorScheme: context.colorScheme, child: child!),
+              child: NativeShellTheme(
+                child: ImmichThemeProvider(colorScheme: context.colorScheme, child: child!),
+              ),
             ),
           ),
         ),

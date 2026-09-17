@@ -63,6 +63,13 @@ android {
       versionNameSuffix '-DEBUG'
     }
 
+    // Flutter's plugin creates this type from debug but does not copy the suffix; without it a
+    // profile build installs over a release-package install instead of the debug app's data.
+    profile {
+      applicationIdSuffix '.debug'
+      versionNameSuffix '-PROFILE'
+    }
+
     release {
       def hasKeystore = file("../key.jks").exists() && file("../key.jks").length() > 0
       signingConfig hasKeystore ? signingConfigs.release : signingConfigs.debug
@@ -93,6 +100,9 @@ dependencies {
   implementation libs.cronet.embedded
   implementation libs.media3.datasource.okhttp
   implementation libs.media3.datasource.cronet
+  // The native shell's asset viewer plays video itself.
+  implementation libs.media3.exoplayer
+  implementation libs.media3.ui
   implementation libs.kotlinx.coroutines.android
   implementation libs.work.runtime.ktx
   implementation libs.concurrent.futures
@@ -107,11 +117,17 @@ dependencies {
   implementation libs.glance.appwidget
   implementation libs.gson
 
-  // Glance Configure
+  // Compose: Glance configure screens and the native shell
+  implementation platform(libs.compose.bom)
   implementation libs.activity.compose
   implementation libs.compose.ui
   implementation libs.compose.ui.tooling
+  implementation libs.compose.foundation
+  implementation libs.compose.animation
   implementation libs.compose.material3
+  implementation libs.compose.material3.adaptive.navigation.suite
+  implementation libs.compose.material3.adaptive
+  implementation libs.compose.material.icons.extended
   implementation libs.lifecycle.runtime.ktx
   implementation libs.material
 }

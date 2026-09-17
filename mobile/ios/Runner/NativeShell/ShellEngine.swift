@@ -94,20 +94,22 @@ final class ShellEngine {
     let attach = attachCount
     let startedAt = CFAbsoluteTimeGetCurrent()
 
-    if let vc = flutterVC {
-      holder?.installStill()
-      vc.willMove(toParent: nil)
-      vc.view.removeFromSuperview()
-      vc.removeFromParent()
-      flutterVC = nil
-    }
+    holder?.installStill()
 
     // Before the move: sent after, the first frames are laid out for the old one.
     host.view.layoutIfNeeded()
     host.reportSettledInsets()
 
+    // The new controller before the old one goes. The engine speaks to Dart on behalf of the
+    // controller it owns: one that deallocates while owned is reported as the app *detaching*,
+    // and Immich acts on that. Owning the new one first, the old leaves unremarked.
     let vc = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
     vc.view.backgroundColor = .systemBackground
+    if let previous = flutterVC {
+      previous.willMove(toParent: nil)
+      previous.view.removeFromSuperview()
+      previous.removeFromParent()
+    }
     flutterVC = vc
     vc.setFlutterViewDidRenderCallback {
       shellLog("[shell] attach#%d first frame=%.1fms", attach, (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
@@ -117,6 +119,10 @@ final class ShellEngine {
     host.flutterContainer.addSubview(vc.view)
     host.pinFlutterSurface(vc.view)
     vc.didMove(toParent: host)
+    // Hosts do not forward appearance (see `ShellFlutterHost`), so this is the one appearance
+    // the controller gets; it is what creates its rendering surface.
+    vc.beginAppearanceTransition(true, animated: false)
+    vc.endAppearanceTransition()
     holder = host
 
     shellLog("[shell] attach#%d host=%@ token=%@", attach, host.shellLabel, host.surfaceToken)
@@ -163,6 +169,13 @@ final class ShellEngine {
   }
 }
 
+/// A host never forwards appearance to the Flutter view controller under it — each conforming
+/// class returns `false` from `shouldAutomaticallyForwardAppearanceMethods`. The engine reports
+/// the controller it owns disappearing as the *app* being paused, and this shell takes it off
+/// screen constantly: a tab switch, a push, a native root or viewer coming over it. Immich
+/// answers "paused" by stopping backup and dropping the websocket, and "resumed" with a full
+/// sync. Dart still hears the app's own background and foreground moves, which the controller
+/// takes from `UIApplication` notifications, not from its view.
 protocol ShellFlutterHost: UIViewController {
   var flutterContainer: UIView { get }
   var shellRoute: String { get }

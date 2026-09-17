@@ -87,7 +87,14 @@ class NativeBarAction {
 class NativeShell {
   static const _channel = MethodChannel('immich/shell');
 
-  static bool get isActive => Platform.isIOS;
+  /// Android opts in per build while its shell is incomplete:
+  /// `--dart-define=IMMICH_NATIVE_SHELL=true`.
+  static const _androidShell = bool.fromEnvironment('IMMICH_NATIVE_SHELL');
+
+  static bool get isActive => Platform.isIOS || (Platform.isAndroid && _androidShell);
+
+  /// Both shells draw their own viewer; Dart's `AssetViewerRoute` is declined in favour of it.
+  static bool get hasNativeViewer => isActive;
 
   /// A sync that crosses a tab tap names the *previous* tab; comparing against
   /// this is what stops it reversing the tap.
@@ -115,13 +122,28 @@ class NativeShell {
       _channel.setMethodCallHandler(_handle);
     }
     // Must land before `auth` flips the native root over to the shell.
+    nativeRoots.value = null;
     unawaited(
-      _channel.invokeMethod('ready', {
-        'tabs': [for (final tab in NativeTab.values) tab.describe()],
-      }),
+      _channel
+          .invokeMethod<Map<Object?, Object?>>('ready', {
+            'tabs': [for (final tab in NativeTab.values) tab.describe()],
+          })
+          .then(_readyReplied),
     );
     unawaited(_channel.invokeMethod('auth', {'signedIn': true}));
     syncStack(force: true);
+  }
+
+  /// Tab ids whose root the shell draws itself, from `ready`'s reply. Null until it
+  /// answers; a shell that returns nothing, or an old one that returns null, owns no
+  /// root. While null, a page that could be native builds its placeholder rather than
+  /// a grid the shell may be about to hide.
+  static final nativeRoots = ValueNotifier<Set<String>?>(null);
+
+  static void _readyReplied(Map<Object?, Object?>? reply) {
+    final roots = {for (final id in reply?['nativeRoots'] as List<Object?>? ?? const []) id.toString()};
+    log('ready: native roots [${roots.join(',')}]');
+    nativeRoots.value = roots;
   }
 
   static void detach() {
@@ -257,8 +279,22 @@ class NativeShell {
     _syncScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _syncScheduled = false;
+      _changeAnnounced = false;
       syncStack(force: true);
     });
+  }
+
+  static bool _changeAnnounced = false;
+
+  /// Tells native, before the frame that paints it, that what is on screen is about to change.
+  /// Native keeps a still of the surface at that moment; taken any later, on either side, the
+  /// picture is already of the new route.
+  static void _announceChange() {
+    if (!isActive || _changeAnnounced) {
+      return;
+    }
+    _changeAnnounced = true;
+    unawaited(_channel.invokeMethod('willChange'));
   }
 
   static Map<String, Object?>? _lastSync;
@@ -292,6 +328,60 @@ class NativeShell {
     unawaited(_channel.invokeMethod('sync', payload));
   }
 
+  static final _barProgress = <String, int>{};
+
+  /// The continuous companion to [setBarCollapsed]: a Material collapsing bar
+  /// scales its title with the scroll, so the crossing alone is not enough.
+  /// Quantised so a scroll does not become a message per frame.
+  static void setBarProgress(String route, double progress) {
+    if (!isActive) {
+      return;
+    }
+    final step = (progress.clamp(0.0, 1.0) * 50).round();
+    if (_barProgress[route] == step) {
+      return;
+    }
+    _barProgress[route] = step;
+    unawaited(_channel.invokeMethod('barScroll', {'route': route, 'progress': step / 50}));
+  }
+
+  static Map<String, Object?>? _lastTheme;
+
+  /// The palette the native chrome should wear. iOS ignores it (system
+  /// materials read as neutral); Android chrome is coloured and would
+  /// otherwise clash with the Flutter surface directly below it.
+  static void setTheme(ColorScheme scheme) {
+    if (!isActive) {
+      return;
+    }
+    final payload = <String, Object?>{
+      'dark': scheme.brightness == Brightness.dark,
+      'primary': scheme.primary.toARGB32(),
+      'onPrimary': scheme.onPrimary.toARGB32(),
+      'primaryContainer': scheme.primaryContainer.toARGB32(),
+      'onPrimaryContainer': scheme.onPrimaryContainer.toARGB32(),
+      'secondary': scheme.secondary.toARGB32(),
+      'onSecondary': scheme.onSecondary.toARGB32(),
+      'secondaryContainer': scheme.secondaryContainer.toARGB32(),
+      'onSecondaryContainer': scheme.onSecondaryContainer.toARGB32(),
+      'surface': scheme.surface.toARGB32(),
+      'onSurface': scheme.onSurface.toARGB32(),
+      'surfaceContainer': scheme.surfaceContainer.toARGB32(),
+      'surfaceContainerHigh': scheme.surfaceContainerHigh.toARGB32(),
+      'surfaceContainerHighest': scheme.surfaceContainerHighest.toARGB32(),
+      'onSurfaceVariant': scheme.onSurfaceVariant.toARGB32(),
+      'outline': scheme.outline.toARGB32(),
+      'outlineVariant': scheme.outlineVariant.toARGB32(),
+      'error': scheme.error.toARGB32(),
+      'onError': scheme.onError.toARGB32(),
+    };
+    if (_sameSync.equals(payload, _lastTheme)) {
+      return;
+    }
+    _lastTheme = payload;
+    unawaited(_channel.invokeMethod('theme', payload));
+  }
+
   /// A threshold, not a stream: the fade between the two states is native.
   static void setBarCollapsed(String route, {required bool collapsed}) {
     if (!isActive || !_bars.setCollapsed(route, collapsed: collapsed)) {
@@ -301,19 +391,27 @@ class NativeShell {
     unawaited(_channel.invokeMethod('barCollapsed', {'route': route, 'collapsed': collapsed}));
   }
 
-  static void didChangeRoutes() => syncStack();
+  // After the frame, not now: the pushed page has not built yet, so a sync sent here would
+  // name a route with no bar, and native would lay the frame out once without it and once
+  // with. Its bar publishes during the build and joins the same post-frame sync.
+  static void didChangeRoutes() {
+    _announceChange();
+    _syncAfterFrame();
+  }
 
   static void didPush(Route<dynamic> route) {
     final name = route.settings.name;
     if (name != null && route is TransitionRoute && !route.opaque) {
       _overlayRoutes.add(name);
     }
-    syncStack();
+    _announceChange();
+    _syncAfterFrame();
   }
 
   static void _onTabsChanged() {
     _watchStacks();
-    syncStack();
+    _announceChange();
+    _syncAfterFrame();
   }
 
   static final _stackRouters = <StackRouter>{};

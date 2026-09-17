@@ -33,12 +33,17 @@ class NativeTimelineBridge {
       return;
     }
     _channel.setMethodCallHandler(_handle);
-    // Listened, not read: the provider hands out a throwaway service first.
-    _ref.listen<TimelineService>(
+    // Listened, not read: the provider hands out a throwaway service first. On the
+    // *container*, not `_ref`: the router owns this bridge, `inLockedViewProvider`
+    // reads the router, and the viewer scopes `timelineServiceProvider` — a `ref`
+    // dependency here would make that read trip Riverpod's scoping assertion. The
+    // main session is the root service by definition, so the container is also right.
+    final main = _ref.container.listen<TimelineService>(
       timelineServiceProvider,
       (_, next) => _bind(_mainSession, next),
       fireImmediately: true,
     );
+    _ref.onDispose(main.close);
     _ref.onDispose(dispose);
   }
 
@@ -129,9 +134,14 @@ class NativeTimelineBridge {
     }
     final generation = session.generation;
     final window = clampWindow(start: start, count: count, total: session.sections.total);
+    final started = DateTime.now();
     final assets = window.count == 0
         ? const <BaseAsset>[]
         : await session.service.loadAssets(window.start, window.count);
+    final took = DateTime.now().difference(started).inMilliseconds;
+    if (took > 200) {
+      NativeShell.log('timeline: window $id@${window.start}+${window.count} took ${took}ms');
+    }
     return {
       'session': id,
       // Re-read: an invalidation may have landed while the load was in flight.
@@ -154,6 +164,7 @@ class NativeTimelineBridge {
       if (remoteId != null) 'thumbUrl': getThumbnailUrlForRemoteId(remoteId),
       if (remoteId != null) 'previewUrl': getThumbnailUrlForRemoteId(remoteId, type: AssetMediaSize.preview),
       if (remoteId != null) 'originalUrl': getOriginalUrlForRemoteId(remoteId),
+      if (remoteId != null && asset.isVideo) 'playbackUrl': getPlaybackUrlForRemoteId(remoteId),
     };
   }
 }

@@ -30,19 +30,26 @@ final class ShellBridge {
   func attach(to engine: FlutterEngine) {
     let channel = FlutterMethodChannel(name: "immich/shell", binaryMessenger: engine.binaryMessenger)
     channel.setMethodCallHandler { [weak self] call, result in
-      self?.handle(call)
-      result(nil)
+      result(self?.handle(call))
     }
     self.channel = channel
   }
 
-  private func handle(_ call: FlutterMethodCall) {
+  /// The tabs whose root this shell draws itself: the first one, the native grid.
+  var nativeRoots: [String] { tabs.first.map { [$0.id] } ?? [] }
+
+  /// Most calls have no reply; `ready` answers with what Dart must not draw.
+  private func handle(_ call: FlutterMethodCall) -> Any? {
     let args = call.arguments as? [String: Any] ?? [:]
     switch call.method {
     case "ready":
       dartIsReady = true
       tabs = (args["tabs"] as? [[String: Any]] ?? []).compactMap(ShellTab.init)
-      shellLog("[shell] dart ready, tabs=[%@]", tabs.map(\.id).joined(separator: ","))
+      shellLog(
+        "[shell] dart ready, tabs=[%@] nativeRoots=[%@]",
+        tabs.map(\.id).joined(separator: ","),
+        nativeRoots.joined(separator: ",")
+      )
       if let route = pendingRoute {
         pendingRoute = nil
         let settle = pendingSettle ?? { _ in }
@@ -50,10 +57,11 @@ final class ShellBridge {
         send(route: route, whenSettled: settle)
       }
       scheduleDebugHooks()
+      return ["nativeRoots": nativeRoots]
     case "auth":
       let signedIn = args["signedIn"] as? Bool ?? false
       let next: AuthState = signedIn ? .signedIn : .signedOut
-      guard next != authState else { return }
+      guard next != authState else { return nil }
       authState = next
       shellLog("[shell] auth signedIn=%@", signedIn ? "yes" : "no")
       onAuthStateChange?(next)
@@ -64,6 +72,11 @@ final class ShellBridge {
         session: args["session"] as? Int ?? TimelineSessions.mainSession,
         index: args["index"] as? Int ?? 0
       )
+    case "willChange":
+      // Android takes its still of the outgoing surface here. This shell re-creates the
+      // `FlutterViewController` per attach and asks Dart to `capture` instead, so there is
+      // nothing to do — but it is not unhandled.
+      break
     case "log":
       shellLog("[shell:dart] %@", args["text"] as? String ?? "?")
     case "search":
@@ -100,6 +113,7 @@ final class ShellBridge {
     default:
       shellLog("[shell] unhandled dart call %@", call.method)
     }
+    return nil
   }
 
 

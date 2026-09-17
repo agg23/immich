@@ -3,6 +3,13 @@ package app.alextran.immich
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.ui.platform.ComposeView
+import androidx.fragment.app.FragmentActivity
+import app.alextran.immich.shell.ShellEngine
+import app.alextran.immich.shell.ShellRoot
 import android.os.ext.SdkExtensions
 import app.alextran.immich.background.BackgroundEngineLock
 import app.alextran.immich.background.BackgroundWorkerApiImpl
@@ -24,18 +31,86 @@ import app.alextran.immich.sync.NativeSyncApi
 import app.alextran.immich.sync.NativeSyncApiImpl26
 import app.alextran.immich.sync.NativeSyncApiImpl30
 import app.alextran.immich.viewintent.ViewIntentPlugin
-import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.android.FlutterFragment
 import io.flutter.embedding.engine.FlutterEngine
 
-class MainActivity : FlutterFragmentActivity() {
-  override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-    super.configureFlutterEngine(flutterEngine)
-    registerPlugins(this, flutterEngine)
+/**
+ * Hosts the native shell. The Flutter surface is a [FlutterFragment] that [ShellEngine] moves
+ * between Compose-owned containers, so this is a plain [FragmentActivity] and everything
+ * `FlutterFragmentActivity` used to forward to its fragment is forwarded here by hand.
+ */
+class MainActivity : FragmentActivity() {
+  override fun onCreate(savedInstanceState: Bundle?) {
+    // `FlutterActivity` makes this switch itself once Flutter draws; nothing does it for us.
+    setTheme(R.style.NormalTheme)
+    super.onCreate(savedInstanceState)
+    enableEdgeToEdge()
+    window.isStatusBarContrastEnforced = false
+    window.isNavigationBarContrastEnforced = false
+    // A restored fragment would look for a container id Compose has since regenerated.
+    val stale = supportFragmentManager.fragments.filterIsInstance<FlutterFragment>()
+    if (stale.isNotEmpty()) {
+      supportFragmentManager.beginTransaction().apply { stale.forEach(::remove) }.commitNow()
+    }
+    ShellEngine.start(this)
+    ShellEngine.bind(this)
+    setContentView(
+      ComposeView(this).apply {
+        // Left unconsumed so the Flutter view still sees the IME and system bars itself.
+        consumeWindowInsets = false
+        setContent { ShellRoot() }
+      }
+    )
+  }
+
+  // App lifecycle follows the activity, not the fragment: see [ShellFlutterFragment].
+  override fun onResume() {
+    super.onResume()
+    ShellEngine.engine.lifecycleChannel.appIsResumed()
+  }
+
+  override fun onPause() {
+    super.onPause()
+    ShellEngine.engine.lifecycleChannel.appIsInactive()
+  }
+
+  override fun onStop() {
+    super.onStop()
+    ShellEngine.engine.lifecycleChannel.appIsPaused()
+  }
+
+  override fun onDestroy() {
+    ShellEngine.engine.lifecycleChannel.appIsDetached()
+    ShellEngine.unbind(this)
+    super.onDestroy()
   }
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     setIntent(intent)
+    ShellEngine.fragment?.onNewIntent(intent)
+  }
+
+  override fun onUserLeaveHint() {
+    super.onUserLeaveHint()
+    ShellEngine.fragment?.onUserLeaveHint()
+  }
+
+  override fun onTrimMemory(level: Int) {
+    super.onTrimMemory(level)
+    ShellEngine.fragment?.onTrimMemory(level)
+  }
+
+  @Deprecated("Deprecated in Java")
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    super.onActivityResult(requestCode, resultCode, data)
+    ShellEngine.fragment?.onActivityResult(requestCode, resultCode, data)
+  }
+
+  @Deprecated("Deprecated in Java")
+  override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    ShellEngine.fragment?.onRequestPermissionsResult(requestCode, permissions, grantResults)
   }
 
   companion object {

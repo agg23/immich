@@ -14,6 +14,9 @@ final class FlutterTabController: UIViewController, ShellFlutterHost {
 
   var flutterContainer: UIView { view }
 
+  /// See `ShellFlutterHost`: the Flutter view controller below never hears it left the screen.
+  override var shouldAutomaticallyForwardAppearanceMethods: Bool { false }
+
   private var search: UISearchController?
 
   private let bar = ShellBarItems(route: "")

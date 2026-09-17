@@ -16,6 +16,7 @@ mixin NativeHeroBar<T extends StatefulWidget> on NativeBarPublisher<T> {
   void reportHeroCollapse(double scrollProgress) {
     final route = barRoute;
     if (_hero && route != null) {
+      NativeShell.setBarProgress(route, scrollProgress);
       NativeShell.setBarCollapsed(route, collapsed: scrollProgress > 0.95);
     }
   }

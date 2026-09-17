@@ -15,6 +15,9 @@ final class FlutterStackController: UIViewController, ShellFlutterHost {
 
   var flutterContainer: UIView { view }
 
+  /// See `ShellFlutterHost`: the Flutter view controller below never hears it left the screen.
+  override var shouldAutomaticallyForwardAppearanceMethods: Bool { false }
+
   var suppressDartPop = false
 
   private lazy var bar = ShellBarItems(route: shellLabel)

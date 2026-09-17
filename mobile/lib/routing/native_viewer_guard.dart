@@ -13,7 +13,7 @@ class NativeViewerGuard extends AutoRouteGuard {
   @override
   void onNavigation(NavigationResolver resolver, StackRouter router) {
     final args = resolver.route.args;
-    if (!NativeShell.isActive || args is! AssetViewerRouteArgs) {
+    if (!NativeShell.hasNativeViewer || args is! AssetViewerRouteArgs) {
       NativeShell.log('viewer guard: passing ${resolver.route.name} (args ${args.runtimeType})');
       resolver.next(true);
       return;

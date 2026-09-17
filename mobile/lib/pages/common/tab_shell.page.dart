@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -102,7 +104,7 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
                       Expanded(child: child),
                     ],
                   )
-                : child,
+                : _reserveNativeBar(context, child),
             bottomNavigationBar: NativeShell.isActive
                 ? null
                 : _BottomNavigationBar(tabsRouter: tabsRouter, destinations: navigationDestinations),
@@ -111,6 +113,21 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
       },
     );
   }
+}
+
+/// A Material navigation bar is opaque and overlaid on the tab root, so the root is laid out
+/// short of it rather than under it: a `CustomScrollView` does not pad itself out of the bottom
+/// inset, and a page that fits the taller viewport has no scroll range to reach the covered rows.
+/// iOS keeps the inset instead — its bar is translucent and content is meant to run under it.
+Widget _reserveNativeBar(BuildContext context, Widget child) {
+  if (!NativeShell.isActive || !Platform.isAndroid) {
+    return child;
+  }
+  final bottom = MediaQuery.paddingOf(context).bottom;
+  return Padding(
+    padding: EdgeInsets.only(bottom: bottom),
+    child: MediaQuery.removePadding(context: context, removeBottom: true, child: child),
+  );
 }
 
 void _onNavigationSelected(TabsRouter router, int index, WidgetRef ref) {

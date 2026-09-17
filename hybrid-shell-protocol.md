@@ -26,9 +26,9 @@ arrive precomputed; a window is complete or it is not sent.
 
 ## Activation
 
-`NativeShell.isActive` gates every call on the Dart side. It is currently
-`Platform.isIOS` and is the single line an Android port flips. When false, Dart draws its
-own chrome and neither channel is used.
+`NativeShell.isActive` gates every call on the Dart side: iOS always, Android per build
+while its shell is incomplete (`--dart-define=IMMICH_NATIVE_SHELL=true`). When false, Dart
+draws its own chrome and neither channel is used.
 
 ---
 
@@ -36,17 +36,27 @@ own chrome and neither channel is used.
 
 ## Dart → native
 
-### `ready`
+### `ready` → `{ nativeRoots: [String] }`
 Sent once per attach, **before `auth`**. Native must not build its tab bar until it
 arrives.
 
 ```
-{ tabs: [ { id: String, label: String, icon: String } ] }
+{ tabs: [ { id: String, label: String, icon: String, role: String? } ] }
 ```
+
+The reply names the tabs whose root native draws itself — today `["photos"]` on both
+shells, the native grid. Dart builds an empty surface for those roots instead of its own
+page: the route stays, so tab indices, `popToRoot` and frames pushed over it are
+unchanged, but no grid is built behind the native one. Until the reply lands Dart
+treats every root as possibly native; a null reply (an older shell) means none are.
 
 `id` is the tab's identity on this channel. Order is identity too — index *n* means the
 same tab on both sides. `label` is already localised; native must not substitute its own.
 `icon` is a token (see [Icon tokens](#icon-tokens)).
+
+`role` is `"search"` on at most one tab, or absent. It says what the tab *is*, not how to
+draw it: iOS 26 renders it as a `UISearchTab` in its own section, and a platform with no
+such affordance treats it as an ordinary tab.
 
 ### `auth`
 ```
@@ -88,12 +98,46 @@ animation.
 A threshold, not a stream. A hero bar starts transparent over a cover photo; Dart reports
 only the crossing and native animates the change.
 
+### `barScroll`
+```
+{ route: String, progress: Double }   // 0 over the cover, 1 fully solid; quantised to 1/50
+```
+The continuous companion to `barCollapsed`. A Material collapsing bar fades and recolours
+*with* the scroll, so the crossing alone is not enough for it; iOS may ignore this and keep
+its crossfade. Sent only when the quantised value changes.
+
+### `theme`
+```
+{
+  dark: Bool,
+  primary, onPrimary, primaryContainer, onPrimaryContainer,
+  secondary, onSecondary, secondaryContainer, onSecondaryContainer,
+  surface, onSurface, surfaceContainer, surfaceContainerHigh, surfaceContainerHighest,
+  onSurfaceVariant, outline, outlineVariant, error, onError: Int,   // ARGB
+}
+```
+The palette Flutter is wearing, sent on attach and whenever it changes. Native chrome that
+is coloured (Android's) adopts it; chrome that reads as neutral material (iOS's) may ignore
+it. Keys may be missing on an older Dart; native falls back per key.
+
 ### `openViewer`
 ```
 { session: Int, index: Int }
 ```
 Dart declines its own `AssetViewerRoute` (via `NativeViewerGuard`) and asks for the native
-viewer instead, so nothing is added to Dart's stack for `sync` to mirror.
+viewer instead, so nothing is added to Dart's stack for `sync` to mirror. Gated on
+`NativeShell.hasNativeViewer`, which both shells now satisfy. The viewer closes the session it
+was given when it leaves (`closeSession`; session 0 is ignored).
+
+### `willChange`
+No arguments. Sent synchronously when a route or tab changes, **before the frame that paints
+the change**. Native that moves one Flutter surface between containers takes its still of the
+outgoing screen here; a picture taken any later — including from Dart, post-frame — is already
+of the new route. Followed by a `sync` after the frame.
+
+Acted on by Android, which moves one `FlutterView` between containers and reads the texture
+itself. iOS accepts it and does nothing: it re-creates its `FlutterViewController` per attach
+and takes stills through `capture` instead.
 
 ### `log`
 ```
@@ -143,7 +187,7 @@ No arguments. Native lost or rebuilt its stack and wants a forced `sync`.
 
 ### `capture` → `Uint8List?`
 No arguments. A PNG of the current Flutter surface, used as a still while the engine
-re-attaches to a different container.
+re-attaches to a different container. iOS only; Android never sends it (see `willChange`).
 
 ---
 
@@ -221,9 +265,10 @@ One of `icon` or `label` is present — `icon` for a translated `IconButton`, `l
 
 ### MenuItem
 ```
-{ label: String, icon: String?, enabled: Bool, destructive: Bool? }
+{ label: String, icon: String?, enabled: Bool, destructive: Bool?, selected: Bool? }
 ```
-Destructive rows are grouped separately by the platform.
+Destructive rows are grouped separately by the platform. `selected` marks the current
+choice in a single-select menu (the search type); the platform decorates it.
 
 ### Asset
 ```
@@ -232,19 +277,23 @@ Destructive rows are grouped separately by the platform.
   isVideo: Bool, durationMs: Int?, createdAt: Int,   // epoch ms
   isFavorite: Bool,
   thumbUrl: String?, previewUrl: String?, originalUrl: String?,
+  playbackUrl: String?,   // videos only: the server's transcoded stream
 }
 ```
-URLs are present only for assets with a `remoteId`.
+URLs are present only for assets with a `remoteId`. A local asset is fetched by `localId`:
+a `PHAsset` identifier on iOS, a MediaStore `_ID` on Android.
 
 ### Icon tokens
 
 Dart names meanings; each platform maps them to its own artwork. Defined by `NativeIcon`
-in `lib/native_shell/native_icon.dart`; iOS resolves them in `ShellIcon.swift`.
+in `lib/native_shell/native_icon.dart`; iOS resolves them in `ShellIcon.swift`, Android in
+`shell/ShellIcon.kt`.
 
 ```
 add  addPhoto  addUser  albums  close  comment  delete  deleteForever
 edit  favorite  favoriteFilled  library  link  overflow  pause  photos
-play  removeUser  restore  search  settings  slideshow  sort
+play  removeUser  restore  search  searchDescription  searchFilename
+searchOcr  searchSmart  settings  slideshow  sort
 ```
 
 An unknown token must log and draw nothing rather than guess — Dart may be newer than the
@@ -258,6 +307,7 @@ action in it has no token, so a missing token degrades a screen rather than brea
 | | |
 |---|---|
 | `ready` precedes `auth` | the tab bar is built from `ready` |
+| `ready`'s reply precedes any root page | Dart builds a placeholder until it knows which roots are native |
 | `sync` may arrive before native has a stack | native re-requests with `resync` |
 | `show` is answered after two rendered frames | one is not enough for a settled layout |
 | `window` replies may arrive out of order | each is stamped with its generation |

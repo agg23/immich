@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The one FragmentContainerView the shell's Flutter surface lives in; see shell/ShellEngine.kt. -->
+    <item name="shell_surface" type="id" />
+</resources>
